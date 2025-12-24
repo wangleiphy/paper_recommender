@@ -56,7 +56,7 @@ class TagDetector:
         
         Args:
             file_path: Path to the file
-            tag_name: Name of the tag (e.g., "Recommended")
+            tag_name: Name of the tag (e.g., "Gray")
             color: Color of the tag (red, orange, yellow, green, blue, purple, gray)
             
         Returns:
@@ -92,18 +92,18 @@ class TagDetector:
             return False
     
     @staticmethod
-    def add_green_tag(file_path: str, tag_name: str = "Recommended") -> bool:
+    def add_green_tag(file_path: str, tag_name: str = "Gray") -> bool:
         """
-        Add a green tag to a file.
+        Add a tag to a file.
         
         Args:
             file_path: Path to the file
-            tag_name: Name of the tag (default: "Recommended")
+            tag_name: Name of the tag (default: "Gray")
             
         Returns:
             True if successful, False otherwise
         """
-        return TagDetector.set_tag(file_path, tag_name, color='green')
+        return TagDetector.set_tag(file_path, tag_name)
     
     @staticmethod
     def has_red_tag(file_path: str) -> bool:

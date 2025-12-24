@@ -151,7 +151,7 @@ Result:
 - ✅ Processed ALL 161 red-tagged papers
 - ✅ Sampled 10 candidate papers
 - ✅ Generated 3 recommendations
-- ✅ Tagged with green successfully
+- ✅ Tagged with Gray successfully
 
 ## Summary
 

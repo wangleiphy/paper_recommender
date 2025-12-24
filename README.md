@@ -8,7 +8,7 @@ An intelligent paper recommendation system that uses macOS Finder tags and seman
 - **Semantic Understanding**: Uses Sentence-BERT to understand paper content, not just keywords
 - **Smart Recommendations**: Automatically recommends ~20% of your papers (adjustable)
 - **Surprise Factor**: Adds variety to avoid echo chambers - includes some "hidden gems"
-- **Auto-Tagging**: Marks recommendations with green "Recommended" tag in Finder
+- **Auto-Tagging**: Marks recommendations with "Gray" tag in Finder
 - **Fast & Free**: Runs locally with caching - no API costs, fast subsequent runs
 - **Large Scale**: Tested on 17,000+ papers
 
@@ -88,7 +88,7 @@ python scripts/recommend.py --subsample 1000 --no-tag
 # Quick demo with small sample
 python examples/demo_diversity.py
 
-# Test green tagging
+# Test Gray tagging
 python examples/test_tagging.py
 
 # Small scale test (100 papers)
@@ -108,7 +108,7 @@ python examples/estimate_cost.py
 3. **Embedding Generation**: Creates semantic embeddings using Sentence-BERT
 4. **Similarity Computation**: Computes average embedding from all your favorites
 5. **Smart Ranking**: Ranks papers by similarity with diversity factor
-6. **Auto-Tagging**: Tags top recommendations with green "Recommended" tag
+6. **Auto-Tagging**: Tags top recommendations with "Gray" tag
 
 ### Key Algorithms
 
@@ -139,9 +139,9 @@ paper_recommender/
 │
 ├── examples/
 │   ├── demo_diversity.py        # Demo: diversity features
-│   ├── demo_with_tagging.py     # Demo: with green tagging
+│   ├── demo_with_tagging.py     # Demo: with Gray tagging
 │   ├── test_small_scale.py      # Test on small sample
-│   ├── test_tagging.py          # Test green tagging
+│   ├── test_tagging.py          # Test Gray tagging
 │   ├── verify_all_refs_used.py  # Verify all refs used
 │   └── estimate_cost.py         # Cost/time estimation
 │

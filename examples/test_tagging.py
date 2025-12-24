@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script to verify green tagging functionality.
+Test script to verify Gray tagging functionality.
 """
 
 import os
@@ -12,10 +12,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from paper_recommender import TagDetector
 
 def test_tagging():
-    """Test the green tagging functionality."""
+    """Test the Gray tagging functionality."""
     
     print("=" * 70)
-    print("Green Tagging Test")
+    print("Gray Tagging Test")
     print("=" * 70)
     print()
     
@@ -51,8 +51,8 @@ def test_tagging():
         print("  (none)")
     print()
     
-    # Add green tag
-    print("Adding green 'Recommended' tag...")
+    # Add Gray tag
+    print("Adding 'Gray' tag...")
     success = TagDetector.add_green_tag(test_pdf)
     
     if success:
@@ -66,7 +66,7 @@ def test_tagging():
     # Verify tag was added
     print("Verifying tag...")
     new_tags = TagDetector.get_tags(test_pdf)
-    print("Tags after adding green tag:")
+    print("Tags after adding Gray tag:")
     for tag in new_tags:
         print(f"  - {tag}")
     
@@ -75,7 +75,7 @@ def test_tagging():
     print("Test completed!")
     print("=" * 70)
     print()
-    print("Check in Finder to verify the green tag appears on:")
+    print("Check in Finder to verify the Gray tag appears on:")
     print(f"  {os.path.basename(test_pdf)}")
     print()
     

@@ -63,7 +63,7 @@ def recommend_papers(
         top_k_percent: Percentage of candidates to recommend (default: 0.20 = 20%)
         verbose: Whether to print verbose output
         recursive: Whether to search subdirectories
-        tag_recommendations: Whether to tag recommended papers with green tag
+        tag_recommendations: Whether to tag recommended papers with Gray tag
         surprise_factor: Fraction of recommendations from "surprise" range (0.0-1.0)
         subsample: If specified, randomly sample this many candidate papers (for faster processing)
     """
@@ -186,14 +186,14 @@ def recommend_papers(
         print(f"   Path: {paper['path']}")
         print()
     
-    # Tag recommended papers with green tag
+    # Tag recommended papers with Gray tag
     if tag_recommendations:
         print()
         print("=" * 70)
         print("Tagging Recommendations")
         print("=" * 70)
         print()
-        print("Adding green 'Recommended' tag to papers...")
+        print("Adding 'Gray' tag to papers...")
         
         tagged_count = 0
         for paper, score in recommendations:
@@ -275,7 +275,7 @@ Examples:
     parser.add_argument(
         '--no-tag',
         action='store_true',
-        help='Do not tag recommended papers with green tag'
+        help='Do not tag recommended papers with Gray tag'
     )
     
     args = parser.parse_args()

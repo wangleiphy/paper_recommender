@@ -40,13 +40,13 @@ That's it! The system will:
 - ✅ Extract text from them
 - ✅ Compute similarity with all other papers
 - ✅ Recommend ~20% of papers
-- ✅ Tag recommendations with green
+- ✅ Tag recommendations with Gray
 
 ## Step 4: Find Your Recommendations
 
 In Finder:
 1. Navigate to your papers folder
-2. Filter by tag: **Green**
+2. Filter by tag: **Gray**
 3. See all recommended papers!
 
 ## What's Next?
@@ -127,7 +127,7 @@ python examples/estimate_cost.py
 → Computing similarity and ranking
 
 ```
-Tagging Recommendations with Green Tag
+Tagging Recommendations with Gray Tag
 Successfully tagged 3455/3455 papers
 ```
 → Marking recommendations in Finder

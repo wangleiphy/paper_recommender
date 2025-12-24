@@ -14,13 +14,13 @@ python examples/demo_diversity.py
 Shows recommendations with 0%, 20%, and 50% surprise factors side-by-side.
 
 ### `demo_with_tagging.py`
-Full demo showing the complete workflow including green tagging of recommendations.
+Full demo showing the complete workflow including Gray tagging of recommendations.
 
 ```bash
 python examples/demo_with_tagging.py
 ```
 
-Processes a small sample and applies green tags to top recommendations.
+Processes a small sample and applies Gray tags to top recommendations.
 
 ### `test_small_scale.py`
 Tests the system on a random sample of papers (default: 100).
@@ -36,7 +36,7 @@ Options:
 - `--keep-temp`: Keep temporary directory after test
 
 ### `test_tagging.py`
-Simple test to verify green tagging functionality works.
+Simple test to verify Gray tagging functionality works.
 
 ```bash
 python examples/test_tagging.py

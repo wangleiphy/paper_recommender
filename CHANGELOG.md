@@ -70,7 +70,7 @@ Complete restructuring of the repository for better organization and maintainabi
 - **No reference sampling**: Always uses ALL red-tagged papers
 
 #### Auto-tagging
-- Automatically tag recommendations with green "Recommended" tag in Finder
+- Automatically tag recommendations with "Gray" tag in Finder
 - Optional: disable with `--no-tag` flag
 
 #### Performance

@@ -41,7 +41,7 @@ What portion of candidates to recommend. Default is 20% - a good balance between
 - Uses ALL red-tagged papers as references
 - Recommends 20% of candidates
 - 20% surprise factor for variety
-- Auto-tags recommendations with green
+- Auto-tags recommendations with Gray
 
 ### Adjustable Parameters
 - `--percent`: Recommendation percentage (5-50% typical)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Demo script to show the recommendation system with green tagging.
+Demo script to show the recommendation system with Gray tagging.
 This will process a small sample and tag the recommendations.
 """
 
@@ -17,14 +17,14 @@ from paper_recommender import TagDetector, PDFExtractor, SimilarityEngine
 
 def demo_recommendation_with_tagging(source_dir: str, num_candidates: int = 10):
     """
-    Demo the recommendation system with green tagging on a small sample.
+    Demo the recommendation system with Gray tagging on a small sample.
     
     Args:
         source_dir: Directory to scan
         num_candidates: Number of candidate papers to consider
     """
     print("=" * 70)
-    print("Paper Recommender - Demo with Green Tagging")
+    print("Paper Recommender - Demo with Gray Tagging")
     print("=" * 70)
     print()
     
@@ -113,7 +113,7 @@ def demo_recommendation_with_tagging(source_dir: str, num_candidates: int = 10):
     
     # Tag recommendations
     print("=" * 70)
-    print("Tagging Recommendations with Green Tag")
+    print("Tagging Recommendations with Gray Tag")
     print("=" * 70)
     print()
     
@@ -130,7 +130,7 @@ def demo_recommendation_with_tagging(source_dir: str, num_candidates: int = 10):
     print("✓ Demo Complete!")
     print("=" * 70)
     print()
-    print("Check Finder to see the green 'Recommended' tags on:")
+    print("Check Finder to see the 'Gray' tags on:")
     for paper, score in recommendations:
         print(f"  - {paper['filename']}")
     print()

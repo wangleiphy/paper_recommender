@@ -14,43 +14,45 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from paper_recommender import TagDetector
+from paper_recommender.utils import copy_extended_attributes
+
 
 def create_test_subset(source_dir: str, sample_size: int = 100):
     """
     Create a temporary directory with a random sample of PDFs.
-    
+
     Args:
         source_dir: Source directory to sample from
         sample_size: Number of PDFs to sample
-        
+
     Returns:
         Path to temporary directory
     """
     print(f"Finding PDFs in {source_dir}...")
     all_pdfs = TagDetector.find_all_pdfs(source_dir, recursive=True)
-    
+
     print(f"Found {len(all_pdfs)} total PDFs")
-    
+
     if len(all_pdfs) == 0:
         print("No PDFs found!")
         return None
-    
+
     # Find red-tagged papers
     red_tagged = [pdf for pdf in all_pdfs if TagDetector.has_red_tag(pdf)]
     print(f"Found {len(red_tagged)} red-tagged PDFs")
-    
+
     if len(red_tagged) == 0:
         print("\nWARNING: No red-tagged PDFs found!")
         print("Please tag some papers with red in Finder first.")
         return None
-    
+
     # Sample non-tagged papers
     non_tagged = [pdf for pdf in all_pdfs if not TagDetector.has_red_tag(pdf)]
-    
+
     if len(non_tagged) == 0:
         print("No non-tagged papers to recommend!")
         return None
-    
+
     # Determine sample size
     # If we have too many red-tagged papers, sample from them too
     if len(red_tagged) >= sample_size:
@@ -59,30 +61,23 @@ def create_test_subset(source_dir: str, sample_size: int = 100):
         actual_sample_size = sample_size - len(red_tagged)
     else:
         actual_sample_size = sample_size - len(red_tagged)
-    
+
     actual_sample_size = min(actual_sample_size, len(non_tagged))
     sampled_non_tagged = random.sample(non_tagged, actual_sample_size)
-    
+
     print(f"Sampling {actual_sample_size} non-tagged PDFs")
-    
+
     # Create temporary directory
     temp_dir = tempfile.mkdtemp(prefix='paper_recommender_test_')
     print(f"\nCreating test directory: {temp_dir}")
-    
+
     # Copy red-tagged papers
     print(f"Copying {len(red_tagged)} red-tagged papers...")
     for pdf in red_tagged:
         dest = os.path.join(temp_dir, os.path.basename(pdf))
         shutil.copy2(pdf, dest)
         # Preserve tags by copying extended attributes
-        try:
-            import xattr
-            src_attrs = xattr.xattr(pdf)
-            dest_attrs = xattr.xattr(dest)
-            for attr in src_attrs.list():
-                dest_attrs.set(attr, src_attrs.get(attr))
-        except:
-            pass
+        copy_extended_attributes(pdf, dest)
     
     # Copy sampled non-tagged papers
     print(f"Copying {len(sampled_non_tagged)} non-tagged papers...")

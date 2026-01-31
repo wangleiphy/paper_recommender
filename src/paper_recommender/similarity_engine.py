@@ -90,16 +90,64 @@ class SimilarityEngine:
     def compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
         """
         Compute cosine similarity between two embeddings.
-        
+
         Args:
             embedding1: First embedding vector
             embedding2: Second embedding vector
-            
+
         Returns:
             Similarity score (0 to 1)
         """
         return cosine_similarity([embedding1], [embedding2])[0][0]
-    
+
+    def get_embeddings_batch(self, papers: List[Dict[str, str]]) -> List[np.ndarray]:
+        """
+        Get embeddings for multiple papers.
+
+        Args:
+            papers: List of paper dicts with 'path' and 'text'
+
+        Returns:
+            List of embedding vectors
+        """
+        embeddings = []
+        for paper in papers:
+            embedding = self.get_embedding(paper['text'], paper['path'])
+            embeddings.append(embedding)
+        return embeddings
+
+    def _compute_candidate_scores(
+        self,
+        reference_embeddings: List[np.ndarray],
+        candidate_papers: List[Dict[str, str]]
+    ) -> List[Tuple[Dict[str, str], float]]:
+        """
+        Compute similarity scores for all candidates against reference embeddings.
+
+        Args:
+            reference_embeddings: List of embeddings for reference papers
+            candidate_papers: List of candidate paper dicts with 'path' and 'text'
+
+        Returns:
+            List of (paper_dict, similarity_score) tuples, sorted by score descending
+        """
+        # Compute embeddings for candidate papers
+        candidate_embeddings = self.get_embeddings_batch(candidate_papers)
+
+        # Compute average reference embedding
+        avg_reference_embedding = np.mean(reference_embeddings, axis=0)
+
+        # Compute similarity scores
+        scores = []
+        for i, candidate_embedding in enumerate(candidate_embeddings):
+            similarity = self.compute_similarity(avg_reference_embedding, candidate_embedding)
+            scores.append((candidate_papers[i], similarity))
+
+        # Sort by similarity score (descending)
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        return scores
+
     def find_similar_papers(
         self,
         reference_embeddings: List[np.ndarray],
@@ -108,41 +156,24 @@ class SimilarityEngine:
     ) -> List[Tuple[Dict[str, str], float]]:
         """
         Find papers most similar to reference papers.
-        
+
         This computes the average embedding across ALL reference papers,
         ensuring recommendations reflect your complete set of preferences.
-        
+
         Args:
             reference_embeddings: List of embeddings for ALL reference papers
             candidate_papers: List of candidate paper dicts with 'path' and 'text'
             top_k: Number of top recommendations to return
-            
+
         Returns:
             List of (paper_dict, similarity_score) tuples, sorted by score
         """
         if not reference_embeddings or not candidate_papers:
             return []
-        
-        # Compute embeddings for candidate papers
-        candidate_embeddings = []
-        for paper in candidate_papers:
-            embedding = self.get_embedding(paper['text'], paper['path'])
-            candidate_embeddings.append(embedding)
-        
-        # Compute average reference embedding
-        avg_reference_embedding = np.mean(reference_embeddings, axis=0)
-        
-        # Compute similarity scores
-        scores = []
-        for i, candidate_embedding in enumerate(candidate_embeddings):
-            similarity = self.compute_similarity(avg_reference_embedding, candidate_embedding)
-            scores.append((candidate_papers[i], similarity))
-        
-        # Sort by similarity score (descending)
-        scores.sort(key=lambda x: x[1], reverse=True)
-        
+
+        scores = self._compute_candidate_scores(reference_embeddings, candidate_papers)
         return scores[:top_k]
-    
+
     def find_similar_papers_with_diversity(
         self,
         reference_embeddings: List[np.ndarray],
@@ -152,54 +183,38 @@ class SimilarityEngine:
     ) -> List[Tuple[Dict[str, str], float]]:
         """
         Find papers similar to reference papers with added diversity/surprise.
-        
+
         This method adds variety to recommendations by:
         - Including top matches (80% by default)
         - Including some "surprise" papers from deeper in the ranking (20% by default)
-        
+
         Args:
             reference_embeddings: List of embeddings for ALL reference papers
             candidate_papers: List of candidate paper dicts with 'path' and 'text'
             top_k: Number of recommendations to return
             surprise_factor: Fraction of results to include from "surprise" range (0.0-1.0)
-            
+
         Returns:
             List of (paper_dict, similarity_score) tuples with diversity
         """
         if not reference_embeddings or not candidate_papers:
             return []
-        
-        # Compute embeddings for candidate papers
-        candidate_embeddings = []
-        for paper in candidate_papers:
-            embedding = self.get_embedding(paper['text'], paper['path'])
-            candidate_embeddings.append(embedding)
-        
-        # Compute average reference embedding
-        avg_reference_embedding = np.mean(reference_embeddings, axis=0)
-        
-        # Compute similarity scores
-        scores = []
-        for i, candidate_embedding in enumerate(candidate_embeddings):
-            similarity = self.compute_similarity(avg_reference_embedding, candidate_embedding)
-            scores.append((candidate_papers[i], similarity))
-        
-        # Sort by similarity score (descending)
-        scores.sort(key=lambda x: x[1], reverse=True)
-        
+
+        scores = self._compute_candidate_scores(reference_embeddings, candidate_papers)
+
         # Calculate split between top matches and surprise papers
         num_top = max(1, int(top_k * (1 - surprise_factor)))
         num_surprise = top_k - num_top
-        
+
         # Get top matches
         recommendations = scores[:num_top]
-        
+
         # Add surprise papers from the next tier
         # Sample from papers ranked between top_k and top_k * 3
         if num_surprise > 0 and len(scores) > top_k:
             surprise_start = top_k
             surprise_end = min(len(scores), top_k * 3)
-            
+
             if surprise_end > surprise_start:
                 import random
                 surprise_pool = scores[surprise_start:surprise_end]
@@ -207,7 +222,7 @@ class SimilarityEngine:
                 num_available = min(num_surprise, len(surprise_pool))
                 surprise_papers = random.sample(surprise_pool, num_available)
                 recommendations.extend(surprise_papers)
-        
+
         # Shuffle slightly to mix top and surprise papers
         import random
         if surprise_factor > 0:
@@ -217,7 +232,7 @@ class SimilarityEngine:
                 rest = recommendations[1:]
                 random.shuffle(rest)
                 recommendations = [top_paper] + rest
-        
+
         return recommendations[:top_k]
     
     def compute_pairwise_similarities(

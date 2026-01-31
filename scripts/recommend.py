@@ -6,103 +6,15 @@ Main script for recommending papers similar to red-tagged ones.
 import os
 import sys
 import argparse
-import shutil
-import re
 from pathlib import Path
-from typing import List, Dict
+from typing import List
 from tqdm import tqdm
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from paper_recommender import TagDetector, PDFExtractor, SimilarityEngine
-
-
-def extract_paper_data(pdf_path: str, verbose: bool = False) -> Dict[str, str]:
-    """
-    Extract text and metadata from a paper.
-    
-    Args:
-        pdf_path: Path to PDF file
-        verbose: Whether to print verbose output
-        
-    Returns:
-        Dictionary with paper data
-    """
-    try:
-        text = PDFExtractor.extract_text(pdf_path, max_pages=10)
-        metadata = PDFExtractor.extract_metadata(pdf_path)
-        
-        return {
-            'path': pdf_path,
-            'text': text,
-            'title': metadata['title'],
-            'author': metadata['author'],
-            'filename': metadata['filename']
-        }
-    except Exception as e:
-        if verbose:
-            print(f"  Warning: Failed to extract from {os.path.basename(pdf_path)}: {e}")
-        return None
-
-
-def move_duplicate_recommendations(recommendations: List, target_dir: str, verbose: bool = False) -> int:
-    """
-    Move recommended papers with duplicate indicators ((1), (2), etc.) to target directory.
-    
-    Args:
-        recommendations: List of (paper_dict, score) tuples
-        target_dir: Directory to move duplicates to
-        verbose: Whether to print verbose output
-        
-    Returns:
-        Number of files successfully moved
-    """
-    # Ensure target directory exists
-    target_path = Path(target_dir)
-    target_path.mkdir(parents=True, exist_ok=True)
-    
-    # Pattern to match (1), (2), etc. in filenames
-    duplicate_pattern = re.compile(r'\([0-9]+\)')
-    
-    duplicate_files = []
-    for paper, score in recommendations:
-        filename = paper['filename']
-        if duplicate_pattern.search(filename):
-            duplicate_files.append(paper['path'])
-    
-    if len(duplicate_files) == 0:
-        return 0
-    
-    if verbose:
-        print(f"Found {len(duplicate_files)} duplicate files to move")
-    
-    moved_count = 0
-    for pdf_path in duplicate_files:
-        filename = os.path.basename(pdf_path)
-        target_file = target_path / filename
-        
-        try:
-            # If file already exists at target, add a unique suffix
-            if target_file.exists():
-                file_path_obj = Path(filename)
-                stem = file_path_obj.stem
-                suffix = file_path_obj.suffix
-                counter = 1
-                while target_file.exists():
-                    new_filename = f"{stem}_moved{counter}{suffix}"
-                    target_file = target_path / new_filename
-                    counter += 1
-            
-            shutil.move(str(pdf_path), str(target_file))
-            moved_count += 1
-            if verbose:
-                print(f"  ✓ Moved: {filename}")
-        except Exception as e:
-            if verbose:
-                print(f"  ✗ Failed to move {filename}: {e}")
-    
-    return moved_count
+from paper_recommender import TagDetector, SimilarityEngine
+from paper_recommender.utils import extract_paper_data, move_files_with_pattern
 
 
 def recommend_papers(
@@ -263,6 +175,8 @@ def recommend_papers(
         tagged_count = 0
         for paper, score in recommendations:
             if TagDetector.add_green_tag(paper['path']):
+                # Update timestamp so tagged files appear in Date Modified sorting
+                Path(paper['path']).touch()
                 tagged_count += 1
                 if verbose:
                     print(f"  ✓ Tagged: {paper['filename']}")
@@ -274,8 +188,10 @@ def recommend_papers(
         if move_duplicates:
             if duplicate_target_dir is None:
                 duplicate_target_dir = '/Users/lewang/Library/CloudStorage/OneDrive-Personal/文档'
-            
-            moved_count = move_duplicate_recommendations(recommendations, duplicate_target_dir, verbose=verbose)
+
+            # Get list of file paths from recommendations
+            file_paths = [paper['path'] for paper, score in recommendations]
+            moved_count = move_files_with_pattern(file_paths, duplicate_target_dir, verbose=verbose)
             if moved_count > 0:
                 print()
                 print(f"Moved {moved_count} duplicate files to: {duplicate_target_dir}")

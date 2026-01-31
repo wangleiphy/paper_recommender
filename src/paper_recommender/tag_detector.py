@@ -137,62 +137,70 @@ class TagDetector:
             pass
         
         return False
-    
+
+    @staticmethod
+    def find_pdfs(directory: str, recursive: bool = True, filter_func=None) -> List[str]:
+        """
+        Find PDF files in a directory, optionally filtered by a function.
+
+        Args:
+            directory: Directory to search
+            recursive: Whether to search subdirectories
+            filter_func: Optional function that takes a file path and returns bool.
+                        Only files where filter_func returns True are included.
+                        If None, all PDFs are included.
+
+        Returns:
+            List of paths to PDF files matching the filter
+        """
+        pdf_files = []
+        directory_path = Path(directory)
+
+        if not directory_path.exists():
+            print(f"Warning: Directory {directory} does not exist")
+            return []
+
+        # Search for PDF files
+        pattern = '**/*.pdf' if recursive else '*.pdf'
+
+        for pdf_file in directory_path.glob(pattern):
+            if pdf_file.is_file():
+                if filter_func is None or filter_func(str(pdf_file)):
+                    pdf_files.append(str(pdf_file))
+
+        return pdf_files
+
     @staticmethod
     def find_red_tagged_pdfs(directory: str, recursive: bool = True) -> List[str]:
         """
         Find all red-tagged PDF files in a directory.
-        
+
         Args:
             directory: Directory to search
             recursive: Whether to search subdirectories
-            
+
         Returns:
             List of paths to red-tagged PDF files
         """
-        red_tagged_files = []
-        directory_path = Path(directory)
-        
-        if not directory_path.exists():
-            print(f"Warning: Directory {directory} does not exist")
-            return []
-        
-        # Search for PDF files
-        pattern = '**/*.pdf' if recursive else '*.pdf'
-        
-        for pdf_file in directory_path.glob(pattern):
-            if pdf_file.is_file() and TagDetector.has_red_tag(str(pdf_file)):
-                red_tagged_files.append(str(pdf_file))
-        
-        return red_tagged_files
-    
+        return TagDetector.find_pdfs(
+            directory,
+            recursive=recursive,
+            filter_func=TagDetector.has_red_tag
+        )
+
     @staticmethod
     def find_all_pdfs(directory: str, recursive: bool = True) -> List[str]:
         """
         Find all PDF files in a directory.
-        
+
         Args:
             directory: Directory to search
             recursive: Whether to search subdirectories
-            
+
         Returns:
             List of paths to all PDF files
         """
-        pdf_files = []
-        directory_path = Path(directory)
-        
-        if not directory_path.exists():
-            print(f"Warning: Directory {directory} does not exist")
-            return []
-        
-        # Search for PDF files
-        pattern = '**/*.pdf' if recursive else '*.pdf'
-        
-        for pdf_file in directory_path.glob(pattern):
-            if pdf_file.is_file():
-                pdf_files.append(str(pdf_file))
-        
-        return pdf_files
+        return TagDetector.find_pdfs(directory, recursive=recursive)
 
 
 if __name__ == '__main__':

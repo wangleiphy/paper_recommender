@@ -1,0 +1,354 @@
+"""
+arXiv API client for fetching recent papers.
+
+Uses the arXiv API to search for and download papers.
+API docs: https://info.arxiv.org/help/api/index.html
+"""
+
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
+import time
+import os
+from typing import List, Dict, Optional
+from datetime import datetime, timedelta
+
+
+class ArxivClient:
+    """Client for fetching papers from arXiv API."""
+
+    BASE_URL = "http://export.arxiv.org/api/query"
+    NAMESPACE = {'atom': 'http://www.w3.org/2005/Atom',
+                 'arxiv': 'http://arxiv.org/schemas/atom'}
+
+    # Common arXiv categories
+    CATEGORIES = {
+        'cs': 'Computer Science',
+        'cs.AI': 'Artificial Intelligence',
+        'cs.CL': 'Computation and Language',
+        'cs.CV': 'Computer Vision',
+        'cs.LG': 'Machine Learning',
+        'cs.NE': 'Neural and Evolutionary Computing',
+        'stat.ML': 'Machine Learning (Statistics)',
+        'physics': 'Physics',
+        'cond-mat': 'Condensed Matter',
+        'math': 'Mathematics',
+        'q-bio': 'Quantitative Biology',
+        'q-fin': 'Quantitative Finance',
+        'eess': 'Electrical Engineering and Systems Science',
+    }
+
+    def __init__(self, delay_between_requests: float = 3.0):
+        """
+        Initialize arXiv client.
+
+        Args:
+            delay_between_requests: Seconds to wait between API calls (arXiv rate limit)
+        """
+        self.delay = delay_between_requests
+        self._last_request_time = 0
+
+    def _wait_for_rate_limit(self):
+        """Respect arXiv rate limiting."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.delay:
+            time.sleep(self.delay - elapsed)
+        self._last_request_time = time.time()
+
+    def search(self,
+               query: Optional[str] = None,
+               categories: Optional[List[str]] = None,
+               max_results: int = 100,
+               days_back: int = 7,
+               sort_by: str = "submittedDate",
+               sort_order: str = "descending") -> List[Dict]:
+        """
+        Search for papers on arXiv.
+
+        Args:
+            query: Search query string (title, abstract, authors)
+            categories: List of arXiv categories to search (e.g., ['cs.AI', 'cs.LG'])
+            max_results: Maximum number of papers to return
+            days_back: Only include papers from the last N days
+            sort_by: Sort field ('submittedDate', 'relevance', 'lastUpdatedDate')
+            sort_order: 'ascending' or 'descending'
+
+        Returns:
+            List of paper dictionaries with keys:
+            - arxiv_id: arXiv identifier
+            - title: Paper title
+            - authors: List of author names
+            - abstract: Paper abstract
+            - pdf_url: URL to download PDF
+            - published: Publication date
+            - categories: List of arXiv categories
+        """
+        # Build search query
+        search_parts = []
+
+        if query:
+            search_parts.append(f'all:{query}')
+
+        if categories:
+            cat_query = ' OR '.join(f'cat:{cat}' for cat in categories)
+            search_parts.append(f'({cat_query})')
+
+        search_query = ' AND '.join(search_parts) if search_parts else 'all:*'
+
+        # Build API URL
+        params = {
+            'search_query': search_query,
+            'start': 0,
+            'max_results': max_results,
+            'sortBy': sort_by,
+            'sortOrder': sort_order
+        }
+
+        url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
+
+        # Make request
+        self._wait_for_rate_limit()
+
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                xml_data = response.read().decode('utf-8')
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
+
+        # Parse XML response
+        papers = self._parse_response(xml_data)
+
+        # Filter by date if specified
+        if days_back:
+            cutoff_date = datetime.now() - timedelta(days=days_back)
+            papers = [p for p in papers if p['published'] >= cutoff_date]
+
+        return papers
+
+    def _parse_response(self, xml_data: str) -> List[Dict]:
+        """Parse arXiv API XML response."""
+        root = ET.fromstring(xml_data)
+        papers = []
+
+        for entry in root.findall('atom:entry', self.NAMESPACE):
+            paper = self._parse_entry(entry)
+            if paper:
+                papers.append(paper)
+
+        return papers
+
+    def _parse_entry(self, entry: ET.Element) -> Optional[Dict]:
+        """Parse a single entry from the API response."""
+        try:
+            # Get arXiv ID from the id URL
+            id_elem = entry.find('atom:id', self.NAMESPACE)
+            if id_elem is None:
+                return None
+            arxiv_id = id_elem.text.split('/abs/')[-1]
+
+            # Get title
+            title_elem = entry.find('atom:title', self.NAMESPACE)
+            title = title_elem.text.strip().replace('\n', ' ') if title_elem is not None else ''
+
+            # Get authors
+            authors = []
+            for author in entry.findall('atom:author', self.NAMESPACE):
+                name = author.find('atom:name', self.NAMESPACE)
+                if name is not None:
+                    authors.append(name.text)
+
+            # Get abstract
+            summary_elem = entry.find('atom:summary', self.NAMESPACE)
+            abstract = summary_elem.text.strip().replace('\n', ' ') if summary_elem is not None else ''
+
+            # Get PDF URL
+            pdf_url = None
+            for link in entry.findall('atom:link', self.NAMESPACE):
+                if link.get('title') == 'pdf':
+                    pdf_url = link.get('href')
+                    break
+
+            # Get publication date
+            published_elem = entry.find('atom:published', self.NAMESPACE)
+            published = None
+            if published_elem is not None:
+                try:
+                    published = datetime.fromisoformat(published_elem.text.replace('Z', '+00:00'))
+                    published = published.replace(tzinfo=None)  # Remove timezone for comparison
+                except:
+                    published = datetime.now()
+
+            # Get categories
+            categories = []
+            for category in entry.findall('atom:category', self.NAMESPACE):
+                term = category.get('term')
+                if term:
+                    categories.append(term)
+
+            # Also check arxiv:primary_category
+            primary_cat = entry.find('arxiv:primary_category', self.NAMESPACE)
+            if primary_cat is not None:
+                term = primary_cat.get('term')
+                if term and term not in categories:
+                    categories.insert(0, term)
+
+            return {
+                'arxiv_id': arxiv_id,
+                'title': title,
+                'authors': authors,
+                'abstract': abstract,
+                'pdf_url': pdf_url,
+                'published': published,
+                'categories': categories
+            }
+
+        except Exception as e:
+            print(f"Warning: Failed to parse arXiv entry: {e}")
+            return None
+
+    def download_pdf(self, paper: Dict, output_dir: str, verbose: bool = False) -> Optional[str]:
+        """
+        Download a paper's PDF.
+
+        Args:
+            paper: Paper dictionary from search()
+            output_dir: Directory to save the PDF
+            verbose: Print progress information
+
+        Returns:
+            Path to downloaded PDF, or None if download failed
+        """
+        if not paper.get('pdf_url'):
+            if verbose:
+                print(f"  No PDF URL for: {paper['title'][:50]}...")
+            return None
+
+        # Create safe filename from arXiv ID
+        arxiv_id = paper['arxiv_id'].replace('/', '_')
+        filename = f"{arxiv_id}.pdf"
+        output_path = os.path.join(output_dir, filename)
+
+        # Skip if already exists
+        if os.path.exists(output_path):
+            if verbose:
+                print(f"  Already exists: {filename}")
+            return output_path
+
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Download PDF
+        self._wait_for_rate_limit()
+
+        if verbose:
+            print(f"  Downloading: {paper['title'][:50]}...")
+
+        try:
+            # Add .pdf extension if not present in URL
+            pdf_url = paper['pdf_url']
+            if not pdf_url.endswith('.pdf'):
+                pdf_url = pdf_url + '.pdf'
+
+            req = urllib.request.Request(
+                pdf_url,
+                headers={'User-Agent': 'paper_recommender/1.0 (academic research tool)'}
+            )
+
+            with urllib.request.urlopen(req, timeout=60) as response:
+                pdf_data = response.read()
+
+            with open(output_path, 'wb') as f:
+                f.write(pdf_data)
+
+            if verbose:
+                size_mb = len(pdf_data) / (1024 * 1024)
+                print(f"    Saved: {filename} ({size_mb:.1f} MB)")
+
+            return output_path
+
+        except Exception as e:
+            if verbose:
+                print(f"    Failed to download: {e}")
+            return None
+
+    def get_recent_papers(self,
+                          categories: List[str],
+                          max_results: int = 100,
+                          days_back: int = 7,
+                          verbose: bool = False) -> List[Dict]:
+        """
+        Get recent papers from specified categories.
+
+        Convenience method for fetching latest papers.
+
+        Args:
+            categories: List of arXiv categories (e.g., ['cs.AI', 'cs.LG'])
+            max_results: Maximum number of papers
+            days_back: Look back this many days
+            verbose: Print progress information
+
+        Returns:
+            List of paper dictionaries
+        """
+        if verbose:
+            print(f"Fetching recent papers from arXiv...")
+            print(f"  Categories: {', '.join(categories)}")
+            print(f"  Looking back {days_back} days")
+
+        papers = self.search(
+            categories=categories,
+            max_results=max_results,
+            days_back=days_back,
+            sort_by="submittedDate",
+            sort_order="descending"
+        )
+
+        if verbose:
+            print(f"  Found {len(papers)} papers")
+
+        return papers
+
+
+def paper_to_text(paper: Dict) -> str:
+    """
+    Convert an arXiv paper dict to text suitable for embedding.
+
+    Args:
+        paper: Paper dictionary from ArxivClient.search()
+
+    Returns:
+        Combined text of title and abstract
+    """
+    parts = []
+
+    if paper.get('title'):
+        parts.append(paper['title'])
+
+    if paper.get('abstract'):
+        parts.append(paper['abstract'])
+
+    return ' '.join(parts)
+
+
+def paper_to_dict(paper: Dict) -> Dict[str, str]:
+    """
+    Convert an arXiv paper to the format used by SimilarityEngine.
+
+    Args:
+        paper: Paper dictionary from ArxivClient.search()
+
+    Returns:
+        Dictionary compatible with SimilarityEngine methods
+    """
+    return {
+        'path': paper.get('arxiv_id', ''),
+        'text': paper_to_text(paper),
+        'title': paper.get('title', ''),
+        'author': ', '.join(paper.get('authors', [])[:3]),  # First 3 authors
+        'filename': f"{paper.get('arxiv_id', 'unknown').replace('/', '_')}.pdf",
+        'arxiv_id': paper.get('arxiv_id', ''),
+        'pdf_url': paper.get('pdf_url', ''),
+        'abstract': paper.get('abstract', ''),
+        'categories': paper.get('categories', []),
+        'published': paper.get('published'),
+    }

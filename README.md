@@ -1,61 +1,119 @@
 # Paper Recommender
 
-Recommend research papers based on macOS Finder tags and semantic similarity.
+Find papers similar to your favorites using semantic similarity.
 
-Tag your favorite papers with **red** in Finder. The system finds similar untagged papers and marks them with **gray**.
-
-## Requirements
-
-- macOS (uses Finder tags)
-- Python 3.8+
+1. Tag papers you like with **red** in Finder
+2. Run the recommender
+3. Similar papers get tagged **gray**
 
 ## Installation
 
 ```bash
+git clone <repo>
+cd paper_recommender
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start
 
 ```bash
-# Tag some papers with red in Finder first, then:
+# First: tag some papers with RED in Finder (right-click → Tags → Red)
 
-# Quick test (sample 1000 papers)
-python scripts/recommend.py --subsample 1000
+# Find similar papers in your local collection
+python scripts/recommend.py local
 
-# Full run (slow first time, cached after)
-python scripts/recommend.py
-
-# More options
-python scripts/recommend.py --help
+# Discover similar papers from arXiv
+python scripts/recommend.py arxiv
 ```
 
-### Options
+## Usage
+
+### Common Flags (both modes)
 
 | Flag | Description |
 |------|-------------|
-| `--subsample N` | Sample N papers for faster processing |
-| `--percent P` | Recommend P% of candidates (default: 20) |
-| `--surprise S` | Diversity factor 0-1 (default: 0.2) |
-| `--top-k K` | Exact number of recommendations |
-| `--no-tag` | Don't auto-tag recommendations |
-| `--verbose` | Show detailed progress |
+| `-k, --top-k N` | Recommend N papers (default: 10) |
+| `-n, --max-candidates N` | Consider at most N candidates (for speed) |
+| `-d, --directory DIR` | Paper directory (default: iCloud Downloads) |
+| `-s, --surprise F` | Diversity 0-1, higher=more variety (default: 0.2) |
+| `-v, --verbose` | Show detailed progress |
+| `--no-tag` | Don't tag recommendations |
+| `--no-recursive` | Don't search subdirectories |
+
+### Local Mode
+
+Find similar papers in your existing PDF collection.
+
+```bash
+python scripts/recommend.py local              # Recommend 10 papers
+python scripts/recommend.py local -k 50        # Recommend 50 papers
+python scripts/recommend.py local -n 1000      # Sample 1000 candidates (faster)
+python scripts/recommend.py local -k 20 -n 500 # Top 20 from 500 candidates
+```
+
+### arXiv Mode
+
+Discover new papers from recent arXiv preprints.
+
+```bash
+python scripts/recommend.py arxiv                   # 10 papers from last 7 days
+python scripts/recommend.py arxiv -k 20             # 20 papers
+python scripts/recommend.py arxiv --days 14         # Last 2 weeks
+python scripts/recommend.py arxiv -c cond-mat       # Only condensed matter
+python scripts/recommend.py arxiv --no-download     # Preview without downloading
+```
+
+**arXiv-specific flags:**
+
+| Flag | Description |
+|------|-------------|
+| `-c, --categories` | arXiv categories to search |
+| `--days N` | Look back N days (default: 7) |
+| `--no-download` | Preview only (don't download) |
+
+**Default categories:** `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
+
+**More categories:**
+| Category | Description |
+|----------|-------------|
+| `cond-mat` | All Condensed Matter |
+| `cond-mat.supr-con` | Superconductivity |
+| `cond-mat.str-el` | Strongly Correlated Electrons |
+| `cond-mat.mtrl-sci` | Materials Science |
+| `quant-ph` | Quantum Physics |
+| `physics.comp-ph` | Computational Physics |
+| `hep-lat` | Lattice QCD |
+| `cs.LG` | Machine Learning |
+| `stat.ML` | Machine Learning (Statistics) |
+
+## Examples
+
+```bash
+# Fast local search: sample 1000 papers, recommend top 20
+python scripts/recommend.py local -k 20 -n 1000
+
+# arXiv condensed matter papers from last 2 weeks
+python scripts/recommend.py arxiv -c cond-mat --days 14 -k 15
+
+# arXiv ML + quantum physics, preview only
+python scripts/recommend.py arxiv -c cs.LG quant-ph --no-download
+
+# Verbose mode to see progress
+python scripts/recommend.py local -v
+```
 
 ## How It Works
 
-1. Finds all red-tagged PDFs (your favorites)
-2. Extracts text and computes embeddings (cached)
-3. Ranks other papers by similarity to your favorites
-4. Tags top recommendations with gray
+1. Finds your red-tagged PDFs (favorites)
+2. Extracts text and creates semantic embeddings
+3. Ranks candidates by similarity to your favorites
+4. Tags top matches with gray
 
-Uses [Sentence-BERT](https://www.sbert.net/) for semantic similarity. Runs locally, no API costs.
+Embeddings are cached (`.cache/`) for fast subsequent runs.
 
-## Troubleshooting
+## Requirements
 
-**No red-tagged PDFs found**: Tag papers with red in Finder (Right-click → Tags → Red)
-
-**Module not found**: Activate venv: `source venv/bin/activate`
-
-**Slow first run**: Normal - embeddings are cached for fast subsequent runs
+- macOS (uses Finder tags)
+- Python 3.8+

@@ -4,30 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Paper Recommender is a macOS-only Python tool that uses Finder tags and semantic similarity to recommend research papers. Users tag favorite papers with red in Finder; the system finds similar untagged papers using Sentence-BERT embeddings and tags recommendations with gray.
+Paper Recommender is a macOS-only Python tool that uses Finder tags and semantic similarity to recommend research papers. Users tag favorite papers with red in Finder; the system finds similar papers using Sentence-BERT embeddings and tags recommendations with gray.
 
 ## Commands
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
-# Or install as editable package
-pip install -e .
 
-# Run recommendations (default: 20% of candidates)
-python scripts/recommend.py
+# === Local Recommendations ===
+# Find similar papers in your local collection
 
-# Fast mode: sample 1000 papers
-python scripts/recommend.py --subsample 1000
+python scripts/recommend.py local                    # Recommend 20% of candidates
+python scripts/recommend.py local --subsample 1000   # Sample 1000 papers first
+python scripts/recommend.py local --top-k 50         # Exactly 50 recommendations
 
-# Custom directory with verbose output
-python scripts/recommend.py --directory ~/Documents/Papers --subsample 500 --verbose
+# === arXiv Recommendations ===
+# Discover new papers from arXiv preprints
 
-# Exact number of recommendations with 30% surprise factor
-python scripts/recommend.py --top-k 50 --surprise 0.3
-
-# Quick validation test
-python examples/test_small_scale.py --sample-size 100
+python scripts/recommend.py arxiv                         # Default: ML + Physics, 7 days
+python scripts/recommend.py arxiv --categories cond-mat   # Only condensed matter
+python scripts/recommend.py arxiv --days 14 --top-k 20    # 2 weeks, 20 papers
+python scripts/recommend.py arxiv --no-download           # Preview only
 ```
 
 ## Architecture
@@ -36,17 +34,17 @@ python examples/test_small_scale.py --sample-size 100
 src/paper_recommender/
 ├── tag_detector.py      # macOS Finder tag operations via xattr
 ├── pdf_extractor.py     # PDF text extraction (PyMuPDF primary, PyPDF2 fallback)
-└── similarity_engine.py # Sentence-BERT embeddings + cosine similarity
+├── similarity_engine.py # Sentence-BERT embeddings + cosine similarity
+└── arxiv_client.py      # arXiv API client for fetching and downloading papers
 
-scripts/recommend.py     # Main CLI entry point orchestrating the workflow
+scripts/recommend.py     # Unified CLI with 'local' and 'arxiv' subcommands
 ```
 
 **Core classes** (import from `paper_recommender`):
 - `TagDetector` - Find/set Finder tags using extended attributes
 - `PDFExtractor` - Extract text and metadata from PDFs
 - `SimilarityEngine` - Generate embeddings, compute similarity, cache results
-
-**Workflow**: Find red-tagged PDFs → Extract text → Generate embeddings → Compute average reference embedding → Rank candidates by cosine similarity → Tag top recommendations gray → Move duplicates
+- `ArxivClient` - Search arXiv, fetch paper metadata, download PDFs
 
 ## Key Implementation Details
 
@@ -57,7 +55,9 @@ scripts/recommend.py     # Main CLI entry point orchestrating the workflow
 - **Tags stored in**: `com.apple.metadata:_kMDItemUserTags` extended attribute (plist format)
 - **Diversity**: `surprise_factor` samples from top-3x candidates to avoid echo chambers
 - **Default directory**: iCloud Downloads (`~/Library/Mobile Documents/com~apple~CloudDocs/Downloads/`)
-- **Duplicate handling**: Files with `(1)`, `(2)` patterns moved to OneDrive by default
+- **arXiv API**: Uses Atom feed API with 3-second delay between requests (rate limiting)
+- **arXiv categories**: Default includes `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
+- **arXiv similarity**: Computed using title+abstract text (no PDF download needed for ranking)
 
 ## Platform Constraint
 

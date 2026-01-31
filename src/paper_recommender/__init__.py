@@ -14,6 +14,7 @@ from .tag_detector import TagDetector
 from .pdf_extractor import PDFExtractor
 from .similarity_engine import SimilarityEngine
 from .utils import extract_paper_data, move_files_with_pattern, copy_extended_attributes
+from .arxiv_client import ArxivClient, paper_to_text, paper_to_dict
 
 __all__ = [
     "TagDetector",
@@ -22,6 +23,9 @@ __all__ = [
     "extract_paper_data",
     "move_files_with_pattern",
     "copy_extended_attributes",
+    "ArxivClient",
+    "paper_to_text",
+    "paper_to_dict",
 ]
 
 

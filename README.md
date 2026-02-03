@@ -72,6 +72,7 @@ python scripts/recommend.py arxiv --no-download     # Preview without downloadin
 | `-c, --categories` | arXiv categories to search |
 | `--days N` | Look back N days (default: 7) |
 | `--no-download` | Preview only (don't download) |
+| `--full-text` | Use full text from arXiv HTML (slower but more accurate) |
 
 **Default categories:** `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
 

@@ -221,6 +221,7 @@ def recommend_arxiv(
     tag_recommendations: bool = True,
     download: bool = True,
     surprise_factor: float = 0.2,
+    use_full_text: bool = False,
 ):
     """Recommend papers from arXiv."""
     if categories is None:
@@ -259,7 +260,20 @@ def recommend_arxiv(
         print("No papers found on arXiv!")
         return
 
-    candidate_papers = [paper_to_dict(p) for p in arxiv_papers]
+    # Fetch full text if requested
+    if use_full_text:
+        print(f"[2.5/5] Fetching full text from arXiv HTML...")
+        candidate_papers = []
+        success_count = 0
+        for paper in tqdm(arxiv_papers, desc="  Fetching HTML", disable=not verbose):
+            full_text = client.fetch_full_text(paper, verbose=verbose)
+            if full_text:
+                success_count += 1
+            candidate_papers.append(paper_to_dict(paper, full_text))
+        print(f"  Got full text for {success_count}/{len(arxiv_papers)} papers")
+        print()
+    else:
+        candidate_papers = [paper_to_dict(p) for p in arxiv_papers]
 
     # Step 3: Compute similarities
     print(f"[3/5] Computing similarities...")
@@ -427,6 +441,10 @@ More categories:
         '--no-download', action='store_true',
         help='Preview only, don\'t download papers'
     )
+    arxiv_parser.add_argument(
+        '--full-text', action='store_true',
+        help='Use full text from arXiv HTML (slower but more accurate)'
+    )
 
     args = parser.parse_args()
 
@@ -475,6 +493,7 @@ More categories:
                 tag_recommendations=not args.no_tag,
                 download=not args.no_download,
                 surprise_factor=args.surprise,
+                use_full_text=args.full_text,
             )
 
         return 0

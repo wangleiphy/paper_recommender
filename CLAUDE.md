@@ -26,6 +26,7 @@ python scripts/recommend.py arxiv                         # Default: ML + Physic
 python scripts/recommend.py arxiv --categories cond-mat   # Only condensed matter
 python scripts/recommend.py arxiv --days 14 --top-k 20    # 2 weeks, 20 papers
 python scripts/recommend.py arxiv --no-download           # Preview only
+python scripts/recommend.py arxiv --full-text             # Use full text from HTML (slower)
 ```
 
 ## Architecture
@@ -57,7 +58,7 @@ scripts/recommend.py     # Unified CLI with 'local' and 'arxiv' subcommands
 - **Default directory**: iCloud Downloads (`~/Library/Mobile Documents/com~apple~CloudDocs/Downloads/`)
 - **arXiv API**: Uses Atom feed API with 3-second delay between requests (rate limiting)
 - **arXiv categories**: Default includes `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
-- **arXiv similarity**: Computed using title+abstract text (no PDF download needed for ranking)
+- **arXiv similarity**: Default uses title+abstract; `--full-text` fetches full text from arXiv HTML pages (slower but more accurate, not all papers have HTML)
 
 ## Platform Constraint
 

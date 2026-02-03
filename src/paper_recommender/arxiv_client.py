@@ -139,7 +139,15 @@ class ArxivClient:
             search_parts.append(f'all:{query}')
 
         if categories:
-            cat_query = ' OR '.join(f'cat:{cat}' for cat in categories)
+            # Add wildcard for broad categories (e.g., cond-mat -> cond-mat*)
+            # This fixes arXiv API sorting issues with parent categories
+            expanded_cats = []
+            for cat in categories:
+                if '.' not in cat and not cat.endswith('*'):
+                    expanded_cats.append(f'{cat}*')
+                else:
+                    expanded_cats.append(cat)
+            cat_query = ' OR '.join(f'cat:{cat}' for cat in expanded_cats)
             search_parts.append(f'({cat_query})')
 
         search_query = ' AND '.join(search_parts) if search_parts else 'all:*'

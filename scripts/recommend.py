@@ -29,6 +29,9 @@ from paper_recommender.utils import extract_paper_data, move_files_with_pattern
 DEFAULT_DIRECTORY = os.path.expanduser('~/Library/Mobile Documents/com~apple~CloudDocs/Downloads/')
 DEFAULT_DUPLICATE_TARGET = '/Users/lewang/Library/CloudStorage/OneDrive-Personal/文档'
 
+# Default arXiv author ID for reference papers
+DEFAULT_AUTHOR_ID = 'wang_l_1'
+
 # Default arXiv categories - ML/AI + Physics
 DEFAULT_ARXIV_CATEGORIES = [
     'cs.LG', 'stat.ML',           # Machine Learning
@@ -69,6 +72,29 @@ def get_reference_papers(directory: str, recursive: bool, verbose: bool) -> tupl
     print()
 
     return red_tagged_pdfs, reference_papers
+
+
+def get_author_reference_papers(author_id: str, verbose: bool) -> List[Dict]:
+    """Fetch papers from an arXiv author page to use as additional references."""
+    print(f"Fetching arXiv preprints for author: {author_id}")
+
+    client = ArxivClient()
+    author_papers = client.get_author_papers(author_id, verbose=verbose)
+
+    if not author_papers:
+        print("  No papers found for this author")
+        return []
+
+    # Convert to reference paper format (using title + abstract as text)
+    reference_papers = []
+    for paper in author_papers:
+        paper_dict = paper_to_dict(paper)
+        reference_papers.append(paper_dict)
+
+    print(f"  Found {len(reference_papers)} arXiv preprints")
+    print()
+
+    return reference_papers
 
 
 def get_reference_embeddings(reference_papers: List[Dict], engine: SimilarityEngine, verbose: bool) -> List:
@@ -116,7 +142,8 @@ def recommend_local(
     surprise_factor: float = 0.2,
     max_candidates: Optional[int] = None,
     move_duplicates: bool = True,
-    duplicate_target_dir: Optional[str] = None
+    duplicate_target_dir: Optional[str] = None,
+    refs: str = 'both',
 ):
     """Recommend papers from local collection."""
     print("=" * 70)
@@ -124,12 +151,26 @@ def recommend_local(
     print("=" * 70)
     print()
 
-    # Step 1: Find red-tagged and all PDFs
-    print("[1/4] Finding papers...")
-    red_tagged_pdfs, reference_papers = get_reference_papers(directory, recursive, verbose)
+    # Step 1: Gather reference papers based on refs mode
+    print("[1/4] Finding reference papers...")
+    reference_papers = []
+    red_tagged_pdfs = []
+
+    if refs in ('tagged', 'both'):
+        red_tagged_pdfs, tagged_papers = get_reference_papers(directory, recursive, verbose)
+        reference_papers.extend(tagged_papers)
+
+    if refs in ('author', 'both'):
+        author_papers = get_author_reference_papers(DEFAULT_AUTHOR_ID, verbose)
+        if author_papers:
+            reference_papers.extend(author_papers)
 
     if not reference_papers:
+        print("No reference papers found!")
         return
+
+    print(f"  Total reference papers: {len(reference_papers)}")
+    print()
 
     all_pdfs = TagDetector.find_all_pdfs(directory, recursive=recursive)
     print(f"  Found {len(all_pdfs)} total PDF files")
@@ -222,6 +263,7 @@ def recommend_arxiv(
     download: bool = True,
     surprise_factor: float = 0.2,
     use_full_text: bool = False,
+    refs: str = 'both',
 ):
     """Recommend papers from arXiv."""
     if categories is None:
@@ -232,12 +274,25 @@ def recommend_arxiv(
     print("=" * 70)
     print()
 
-    # Step 1: Get reference papers
+    # Step 1: Gather reference papers based on refs mode
     print("[1/5] Finding reference papers...")
-    _, reference_papers = get_reference_papers(reference_directory, recursive, verbose)
+    reference_papers = []
+
+    if refs in ('tagged', 'both'):
+        _, tagged_papers = get_reference_papers(reference_directory, recursive, verbose)
+        reference_papers.extend(tagged_papers)
+
+    if refs in ('author', 'both'):
+        author_papers = get_author_reference_papers(DEFAULT_AUTHOR_ID, verbose)
+        if author_papers:
+            reference_papers.extend(author_papers)
 
     if not reference_papers:
+        print("No reference papers found!")
         return
+
+    print(f"  Total reference papers: {len(reference_papers)}")
+    print()
 
     # Step 2: Fetch from arXiv
     print(f"[2/5] Fetching from arXiv...")
@@ -359,6 +414,10 @@ def add_common_args(parser):
         '--no-tag', action='store_true',
         help='Don\'t tag recommendations with Gray'
     )
+    parser.add_argument(
+        '--refs', type=str, default='both', choices=['author', 'tagged', 'both'],
+        help='Reference source: author (arXiv preprints), tagged (red-tagged PDFs), or both (default: both)'
+    )
 
 
 def main():
@@ -470,6 +529,7 @@ More categories:
                 max_candidates=args.max_candidates,
                 move_duplicates=not args.no_move_duplicates,
                 duplicate_target_dir=args.duplicate_target,
+                refs=args.refs,
             )
 
         elif args.mode == 'arxiv':
@@ -494,6 +554,7 @@ More categories:
                 download=not args.no_download,
                 surprise_factor=args.surprise,
                 use_full_text=args.full_text,
+                refs=args.refs,
             )
 
         return 0

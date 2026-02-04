@@ -2,9 +2,11 @@
 
 Find papers similar to your favorites using semantic similarity.
 
-1. Tag papers you like with **red** in Finder
-2. Run the recommender
-3. Similar papers get tagged **gray**
+**Reference sources:**
+- Your **arXiv publications** (fetched automatically)
+- Papers tagged **red** in Finder
+
+Run the recommender → similar papers get tagged **gray**
 
 ## Installation
 
@@ -19,13 +21,14 @@ pip install -r requirements.txt
 ## Quick Start
 
 ```bash
-# First: tag some papers with RED in Finder (right-click → Tags → Red)
-
 # Find similar papers in your local collection
 python scripts/recommend.py local
 
 # Discover similar papers from arXiv
 python scripts/recommend.py arxiv
+
+# Use only red-tagged papers as references (no arXiv author papers)
+python scripts/recommend.py local --refs tagged
 ```
 
 ## Usage
@@ -34,6 +37,7 @@ python scripts/recommend.py arxiv
 
 | Flag | Description |
 |------|-------------|
+| `--refs {author,tagged,both}` | Reference source (default: both) |
 | `-k, --top-k N` | Recommend N papers (default: 10) |
 | `-n, --max-candidates N` | Consider at most N candidates (for speed) |
 | `-d, --directory DIR` | Paper directory (default: iCloud Downloads) |
@@ -107,9 +111,9 @@ python scripts/recommend.py local -v
 
 ## How It Works
 
-1. Finds your red-tagged PDFs (favorites)
+1. Gathers reference papers (your arXiv publications and/or red-tagged PDFs)
 2. Extracts text and creates semantic embeddings
-3. Ranks candidates by similarity to your favorites
+3. Ranks candidates by similarity to your references
 4. Tags top matches with gray
 
 Embeddings are cached (`.cache/`) for fast subsequent runs.

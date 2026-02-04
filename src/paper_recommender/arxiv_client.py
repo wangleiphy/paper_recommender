@@ -391,6 +391,91 @@ class ArxivClient:
                 print(f"    Failed to fetch HTML: {e}")
             return None
 
+    def get_author_papers(self,
+                          author_id: str,
+                          max_results: int = 200,
+                          verbose: bool = False) -> List[Dict]:
+        """
+        Get papers by an arXiv author ID.
+
+        Args:
+            author_id: arXiv author identifier (e.g., 'wang_l_1' from arxiv.org/a/wang_l_1.html)
+            max_results: Maximum number of papers to fetch
+            verbose: Print progress information
+
+        Returns:
+            List of paper dictionaries
+        """
+        if verbose:
+            print(f"Fetching papers for author: {author_id}")
+
+        # Fetch the author page to get paper IDs
+        author_url = f"https://arxiv.org/a/{author_id}.html"
+        self._wait_for_rate_limit()
+
+        try:
+            req = urllib.request.Request(
+                author_url,
+                headers={'User-Agent': 'paper_recommender/1.0 (academic research tool)'}
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:
+                html_data = response.read().decode('utf-8', errors='ignore')
+        except Exception as e:
+            if verbose:
+                print(f"  Failed to fetch author page: {e}")
+            return []
+
+        # Extract arXiv IDs from the page (format: arxiv:XXXX.XXXXX or abs/XXXX.XXXXX)
+        arxiv_ids = re.findall(r'(?:arxiv:|/abs/)(\d{4}\.\d{4,5}(?:v\d+)?)', html_data)
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_ids = []
+        for aid in arxiv_ids:
+            if aid not in seen:
+                seen.add(aid)
+                unique_ids.append(aid)
+
+        if verbose:
+            print(f"  Found {len(unique_ids)} papers on author page")
+
+        if not unique_ids:
+            return []
+
+        # Limit to max_results
+        unique_ids = unique_ids[:max_results]
+
+        # Fetch paper details via API (batch by ID list)
+        papers = []
+        batch_size = 50  # arXiv API limit per request
+
+        for i in range(0, len(unique_ids), batch_size):
+            batch_ids = unique_ids[i:i + batch_size]
+            id_list = ','.join(batch_ids)
+
+            params = {
+                'id_list': id_list,
+                'max_results': len(batch_ids)
+            }
+            url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
+
+            self._wait_for_rate_limit()
+
+            try:
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    xml_data = response.read().decode('utf-8')
+                batch_papers = self._parse_response(xml_data)
+                papers.extend(batch_papers)
+                if verbose:
+                    print(f"  Fetched {len(batch_papers)} papers (batch {i // batch_size + 1})")
+            except Exception as e:
+                if verbose:
+                    print(f"  Failed to fetch batch: {e}")
+
+        if verbose:
+            print(f"  Total: {len(papers)} papers retrieved")
+
+        return papers
+
     def get_recent_papers(self,
                           categories: List[str],
                           max_results: int = 100,

@@ -59,6 +59,7 @@ scripts/recommend.py     # Unified CLI with 'local' and 'arxiv' subcommands
 - **arXiv API**: Uses Atom feed API with 3-second delay between requests (rate limiting)
 - **arXiv categories**: Default includes `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
 - **arXiv similarity**: Default uses title+abstract; `--full-text` fetches full text from arXiv HTML pages (slower but more accurate, not all papers have HTML)
+- **Author references**: By default uses both red-tagged papers and arXiv preprints from author `wang_l_1`; use `--refs author` for only arXiv preprints, `--refs tagged` for only red-tagged papers
 
 ## Platform Constraint
 

@@ -556,7 +556,7 @@ def paper_to_dict(paper: Dict, full_text: Optional[str] = None) -> Dict[str, str
         'path': paper.get('arxiv_id', ''),
         'text': paper_to_text(paper, full_text),
         'title': paper.get('title', ''),
-        'author': ', '.join(paper.get('authors', [])[:3]),  # First 3 authors
+        'author': ', '.join(paper.get('authors', [])),  # All authors
         'filename': f"{paper.get('arxiv_id', 'unknown').replace('/', '_')}.pdf",
         'arxiv_id': paper.get('arxiv_id', ''),
         'pdf_url': paper.get('pdf_url', ''),

@@ -396,7 +396,7 @@ def add_common_args(parser):
     )
     parser.add_argument(
         '--max-candidates', '-n', type=int, default=None,
-        help='Max candidate papers to consider (default: all for local, 100 for arxiv)'
+        help='Max candidate papers to consider (default: 1000 for both local and arxiv)'
     )
     parser.add_argument(
         '--surprise', '-s', type=float, default=0.2,
@@ -526,7 +526,7 @@ More categories:
                 recursive=not args.no_recursive,
                 tag_recommendations=not args.no_tag,
                 surprise_factor=args.surprise,
-                max_candidates=args.max_candidates,
+                max_candidates=args.max_candidates if args.max_candidates else 1000,
                 move_duplicates=not args.no_move_duplicates,
                 duplicate_target_dir=args.duplicate_target,
                 refs=args.refs,
@@ -538,8 +538,8 @@ More categories:
                 print(f"Error: Directory not found: {ref_dir}")
                 return 1
 
-            # Default max_candidates for arxiv is 100
-            max_candidates = args.max_candidates if args.max_candidates else 100
+            # Default max_candidates for arxiv is 1000
+            max_candidates = args.max_candidates if args.max_candidates else 1000
 
             recommend_arxiv(
                 reference_directory=ref_dir,

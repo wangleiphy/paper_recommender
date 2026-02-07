@@ -144,6 +144,7 @@ def recommend_local(
     move_duplicates: bool = True,
     duplicate_target_dir: Optional[str] = None,
     refs: str = 'both',
+    model_name: str = 'all-mpnet-base-v2',
 ):
     """Recommend papers from local collection."""
     print("=" * 70)
@@ -211,7 +212,7 @@ def recommend_local(
     print(f"  Will recommend {top_k} papers from {len(candidate_papers)} candidates")
     print()
 
-    engine = SimilarityEngine()
+    engine = SimilarityEngine(model_name=model_name)
     reference_embeddings = get_reference_embeddings(reference_papers, engine, verbose)
 
     recommendations = engine.find_similar_papers_with_diversity(
@@ -264,6 +265,7 @@ def recommend_arxiv(
     surprise_factor: float = 0.2,
     use_full_text: bool = False,
     refs: str = 'both',
+    model_name: str = 'all-mpnet-base-v2',
 ):
     """Recommend papers from arXiv."""
     if categories is None:
@@ -336,7 +338,7 @@ def recommend_arxiv(
     print(f"  Will recommend {top_k} papers")
     print()
 
-    engine = SimilarityEngine()
+    engine = SimilarityEngine(model_name=model_name)
     reference_embeddings = get_reference_embeddings(reference_papers, engine, verbose)
 
     recommendations = engine.find_similar_papers_with_diversity(
@@ -401,6 +403,10 @@ def add_common_args(parser):
     parser.add_argument(
         '--surprise', '-s', type=float, default=0.2,
         help='Diversity factor 0-1, higher=more variety (default: 0.2)'
+    )
+    parser.add_argument(
+        '--model', '-m', type=str, default='all-mpnet-base-v2',
+        help='Sentence transformer model (default: all-mpnet-base-v2, alternative: all-MiniLM-L6-v2)'
     )
     parser.add_argument(
         '--verbose', '-v', action='store_true',
@@ -530,6 +536,7 @@ More categories:
                 move_duplicates=not args.no_move_duplicates,
                 duplicate_target_dir=args.duplicate_target,
                 refs=args.refs,
+                model_name=args.model,
             )
 
         elif args.mode == 'arxiv':
@@ -555,6 +562,7 @@ More categories:
                 surprise_factor=args.surprise,
                 use_full_text=args.full_text,
                 refs=args.refs,
+                model_name=args.model,
             )
 
         return 0

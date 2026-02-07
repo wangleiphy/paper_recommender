@@ -50,7 +50,7 @@ scripts/recommend.py     # Unified CLI with 'local' and 'arxiv' subcommands
 ## Key Implementation Details
 
 - **Caching**: Embeddings cached at `.cache/embeddings_cache.pkl` - delete to reset
-- **Model**: Uses `all-MiniLM-L6-v2` (384-dim, ~90MB download on first run)
+- **Model**: Uses `all-mpnet-base-v2` by default (768-dim, ~420MB); use `--model all-MiniLM-L6-v2` for faster/smaller alternative
 - **PDF extraction**: First 10 pages only (`max_pages=10`) for efficiency
 - **Tag colors**: red=6, orange=7, yellow=5, green=2, blue=4, purple=3, gray=1
 - **Tags stored in**: `com.apple.metadata:_kMDItemUserTags` extended attribute (plist format)

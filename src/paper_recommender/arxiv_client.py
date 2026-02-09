@@ -104,6 +104,21 @@ class ArxivClient:
             time.sleep(self.delay - elapsed)
         self._last_request_time = time.time()
 
+    @staticmethod
+    def _business_days_cutoff(days_back: int) -> datetime:
+        """Compute cutoff date counting only business days (Mon-Fri).
+
+        arXiv doesn't publish on weekends, so --days 1 on Monday
+        should look back to Friday.
+        """
+        cutoff = datetime.now()
+        remaining = days_back
+        while remaining > 0:
+            cutoff -= timedelta(days=1)
+            if cutoff.weekday() < 5:  # Mon=0 .. Fri=4
+                remaining -= 1
+        return cutoff
+
     def search(self,
                query: Optional[str] = None,
                categories: Optional[List[str]] = None,
@@ -175,9 +190,10 @@ class ArxivClient:
         # Parse XML response
         papers = self._parse_response(xml_data)
 
-        # Filter by date if specified
+        # Filter by date if specified (count business days since arXiv
+        # doesn't publish on weekends)
         if days_back:
-            cutoff_date = datetime.now() - timedelta(days=days_back)
+            cutoff_date = self._business_days_cutoff(days_back)
             papers = [p for p in papers if p['published'] >= cutoff_date]
 
         return papers

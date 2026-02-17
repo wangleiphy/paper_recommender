@@ -72,17 +72,18 @@ class SimilarityEngine:
         Returns:
             Embedding vector
         """
-        # Check cache
-        if file_path and file_path in self.embeddings_cache:
-            return self.embeddings_cache[file_path]
-        
+        # Check cache (key includes model name to avoid mixing dimensions)
+        cache_key = f"{self.model_name}::{file_path}" if file_path else None
+        if cache_key and cache_key in self.embeddings_cache:
+            return self.embeddings_cache[cache_key]
+
         # Compute embedding
         model = self._get_model()
         embedding = model.encode(text, convert_to_numpy=True)
-        
+
         # Cache it
-        if file_path:
-            self.embeddings_cache[file_path] = embedding
+        if cache_key:
+            self.embeddings_cache[cache_key] = embedding
             self._save_cache()
         
         return embedding

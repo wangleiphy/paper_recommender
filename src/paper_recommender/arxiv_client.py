@@ -12,7 +12,7 @@ import time
 import os
 import re
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 
@@ -111,7 +111,7 @@ class ArxivClient:
         arXiv doesn't publish on weekends, so --days 1 on Monday
         should look back to Friday.
         """
-        cutoff = datetime.now()
+        cutoff = datetime.now(tz=timezone.utc).replace(tzinfo=None)
         remaining = days_back
         while remaining > 0:
             cutoff -= timedelta(days=1)
@@ -191,7 +191,7 @@ class ArxivClient:
         papers = self._parse_response(xml_data)
 
         # Filter by date if specified (count business days since arXiv
-        # doesn't publish on weekends)
+        # doesn't publish on weekends; use UTC to match arXiv timestamps)
         if days_back:
             cutoff_date = self._business_days_cutoff(days_back)
             papers = [p for p in papers if p['published'] >= cutoff_date]

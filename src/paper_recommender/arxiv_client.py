@@ -192,11 +192,40 @@ class ArxivClient:
 
         # Filter by date if specified (count business days since arXiv
         # doesn't publish on weekends; use UTC to match arXiv timestamps)
-        if days_back:
+        if days_back is not None:
             cutoff_date = self._business_days_cutoff(days_back)
             papers = [p for p in papers if p['published'] >= cutoff_date]
 
         return papers
+
+    def fetch_by_ids(self, arxiv_ids: List[str], verbose: bool = False) -> List[Dict]:
+        """
+        Fetch papers by their arXiv IDs.
+
+        Args:
+            arxiv_ids: List of arXiv IDs (e.g., ['2603.05164', '2603.05164v1'])
+            verbose: Print progress information
+
+        Returns:
+            List of paper dictionaries
+        """
+        id_list = ','.join(arxiv_ids)
+        params = {
+            'id_list': id_list,
+            'max_results': len(arxiv_ids),
+        }
+        url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
+
+        self._wait_for_rate_limit()
+
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                xml_data = response.read().decode('utf-8')
+            return self._parse_response(xml_data)
+        except Exception as e:
+            if verbose:
+                print(f"  Failed to fetch by IDs: {e}")
+            return []
 
     def _parse_response(self, xml_data: str) -> List[Dict]:
         """Parse arXiv API XML response."""

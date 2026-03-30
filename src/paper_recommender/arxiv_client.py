@@ -6,6 +6,7 @@ API docs: https://info.arxiv.org/help/api/index.html
 """
 
 import urllib.request
+import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
 import time
@@ -87,14 +88,16 @@ class ArxivClient:
         'eess': 'Electrical Engineering and Systems Science',
     }
 
-    def __init__(self, delay_between_requests: float = 3.0):
+    def __init__(self, delay_between_requests: float = 3.0, max_retries: int = 5):
         """
         Initialize arXiv client.
 
         Args:
             delay_between_requests: Seconds to wait between API calls (arXiv rate limit)
+            max_retries: Maximum number of retries on 429 rate limit errors
         """
         self.delay = delay_between_requests
+        self.max_retries = max_retries
         self._last_request_time = 0
 
     def _wait_for_rate_limit(self):
@@ -103,6 +106,23 @@ class ArxivClient:
         if elapsed < self.delay:
             time.sleep(self.delay - elapsed)
         self._last_request_time = time.time()
+
+    def _fetch_url(self, url: str, timeout: int = 30) -> str:
+        """Fetch a URL with retry on 429 rate limit errors."""
+        self._wait_for_rate_limit()
+
+        for attempt in range(self.max_retries):
+            try:
+                with urllib.request.urlopen(url, timeout=timeout) as response:
+                    return response.read().decode('utf-8')
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self.max_retries - 1:
+                    wait_time = self.delay * (2 ** attempt)
+                    print(f"  Rate limited (429), retrying in {wait_time:.0f}s... (attempt {attempt + 1}/{self.max_retries})")
+                    time.sleep(wait_time)
+                    self._last_request_time = time.time()
+                else:
+                    raise
 
     @staticmethod
     def _business_days_cutoff(days_back: int) -> datetime:
@@ -179,11 +199,8 @@ class ArxivClient:
         url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
 
         # Make request
-        self._wait_for_rate_limit()
-
         try:
-            with urllib.request.urlopen(url, timeout=30) as response:
-                xml_data = response.read().decode('utf-8')
+            xml_data = self._fetch_url(url)
         except Exception as e:
             raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
 
@@ -216,11 +233,8 @@ class ArxivClient:
         }
         url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
 
-        self._wait_for_rate_limit()
-
         try:
-            with urllib.request.urlopen(url, timeout=30) as response:
-                xml_data = response.read().decode('utf-8')
+            xml_data = self._fetch_url(url)
             return self._parse_response(xml_data)
         except Exception as e:
             if verbose:
@@ -456,15 +470,9 @@ class ArxivClient:
 
         # Fetch the author page to get paper IDs
         author_url = f"https://arxiv.org/a/{author_id}.html"
-        self._wait_for_rate_limit()
 
         try:
-            req = urllib.request.Request(
-                author_url,
-                headers={'User-Agent': 'paper_recommender/1.0 (academic research tool)'}
-            )
-            with urllib.request.urlopen(req, timeout=30) as response:
-                html_data = response.read().decode('utf-8', errors='ignore')
+            html_data = self._fetch_url(author_url)
         except Exception as e:
             if verbose:
                 print(f"  Failed to fetch author page: {e}")
@@ -503,11 +511,8 @@ class ArxivClient:
             }
             url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
 
-            self._wait_for_rate_limit()
-
             try:
-                with urllib.request.urlopen(url, timeout=30) as response:
-                    xml_data = response.read().decode('utf-8')
+                xml_data = self._fetch_url(url)
                 batch_papers = self._parse_response(xml_data)
                 papers.extend(batch_papers)
                 if verbose:

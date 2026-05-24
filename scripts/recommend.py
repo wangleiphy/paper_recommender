@@ -40,6 +40,7 @@ DEFAULT_ARXIV_CATEGORIES = [
     'physics.chem-ph',            # Chemical Physics
     'quant-ph',                   # Quantum Physics
 ]
+DEFAULT_FULL_TEXT_LIMIT = 50
 
 
 def get_reference_papers(directory: str, recursive: bool, verbose: bool) -> tuple:
@@ -264,6 +265,7 @@ def recommend_arxiv(
     download: bool = True,
     surprise_factor: float = 0.2,
     use_full_text: bool = False,
+    max_full_text_fetches: int = DEFAULT_FULL_TEXT_LIMIT,
     refs: str = 'both',
     model_name: str = 'all-mpnet-base-v2',
 ):
@@ -319,15 +321,24 @@ def recommend_arxiv(
 
     # Fetch full text if requested
     if use_full_text:
+        full_text_budget = min(max(0, max_full_text_fetches), len(arxiv_papers))
         print(f"[2.5/5] Fetching full text from arXiv HTML...")
-        candidate_papers = []
+        print(f"  Limit: {full_text_budget}/{len(arxiv_papers)} papers")
+        if full_text_budget < len(arxiv_papers):
+            print("  Remaining candidates will use title + abstract only")
+
+        full_text_by_id = {}
         success_count = 0
-        for paper in tqdm(arxiv_papers, desc="  Fetching HTML", disable=not verbose):
+        for paper in tqdm(arxiv_papers[:full_text_budget], desc="  Fetching HTML", disable=not verbose):
             full_text = client.fetch_full_text(paper, verbose=verbose)
             if full_text:
+                full_text_by_id[paper.get('arxiv_id', '')] = full_text
                 success_count += 1
-            candidate_papers.append(paper_to_dict(paper, full_text))
-        print(f"  Got full text for {success_count}/{len(arxiv_papers)} papers")
+        candidate_papers = [
+            paper_to_dict(paper, full_text_by_id.get(paper.get('arxiv_id', '')))
+            for paper in arxiv_papers
+        ]
+        print(f"  Got full text for {success_count}/{full_text_budget} fetched papers")
         print()
     else:
         candidate_papers = [paper_to_dict(p) for p in arxiv_papers]
@@ -510,6 +521,10 @@ More categories:
         '--full-text', action='store_true',
         help='Use full text from arXiv HTML (slower but more accurate)'
     )
+    arxiv_parser.add_argument(
+        '--full-text-limit', type=int, default=DEFAULT_FULL_TEXT_LIMIT,
+        help=f'Max arXiv HTML pages to fetch with --full-text (default: {DEFAULT_FULL_TEXT_LIMIT})'
+    )
 
     args = parser.parse_args()
 
@@ -561,6 +576,7 @@ More categories:
                 download=not args.no_download,
                 surprise_factor=args.surprise,
                 use_full_text=args.full_text,
+                max_full_text_fetches=args.full_text_limit,
                 refs=args.refs,
                 model_name=args.model,
             )

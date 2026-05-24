@@ -9,6 +9,8 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
+import socket
+import threading
 import time
 import os
 import re
@@ -67,9 +69,17 @@ class ArxivHTMLParser(HTMLParser):
 class ArxivClient:
     """Client for fetching papers from arXiv API."""
 
-    BASE_URL = "http://export.arxiv.org/api/query"
+    BASE_URL = "https://export.arxiv.org/api/query"
     NAMESPACE = {'atom': 'http://www.w3.org/2005/Atom',
                  'arxiv': 'http://arxiv.org/schemas/atom'}
+    MIN_DELAY_SECONDS = 3.0
+    DEFAULT_DELAY_SECONDS = 3.1
+    DEFAULT_PAGE_SIZE = 200
+    MAX_PAGE_SIZE = 2000
+    MAX_QUERY_RESULTS = 30000
+    DEFAULT_USER_AGENT = "paper-recommender/1.0.0 (academic research tool)"
+    _request_lock = threading.Lock()
+    _last_request_finished_at = 0.0
 
     # Common arXiv categories
     CATEGORIES = {
@@ -88,41 +98,111 @@ class ArxivClient:
         'eess': 'Electrical Engineering and Systems Science',
     }
 
-    def __init__(self, delay_between_requests: float = 3.0, max_retries: int = 5):
+    def __init__(
+        self,
+        delay_between_requests: float = DEFAULT_DELAY_SECONDS,
+        max_retries: int = 5,
+        user_agent: Optional[str] = None,
+        contact: Optional[str] = None,
+        max_retry_delay: float = 120.0,
+    ):
         """
         Initialize arXiv client.
 
         Args:
-            delay_between_requests: Seconds to wait between API calls (arXiv rate limit)
-            max_retries: Maximum number of retries on 429 rate limit errors
+            delay_between_requests: Seconds to wait after each arXiv request.
+                arXiv asks clients to make no more than one request every
+                three seconds, so values below 3.0 are rounded up.
+            max_retries: Maximum number of retries on 429, 5xx, and timeout errors
+            user_agent: Optional User-Agent override. Can also be set with
+                PAPER_RECOMMENDER_USER_AGENT.
+            contact: Optional contact email or URL. Can also be set with
+                PAPER_RECOMMENDER_CONTACT and is sent in the From header.
+            max_retry_delay: Maximum exponential backoff sleep in seconds
         """
-        self.delay = delay_between_requests
+        self.delay = max(float(delay_between_requests), self.MIN_DELAY_SECONDS)
         self.max_retries = max_retries
-        self._last_request_time = 0
+        self.max_retry_delay = max_retry_delay
+        self.contact = contact or os.environ.get("PAPER_RECOMMENDER_CONTACT")
+        self.user_agent = (
+            user_agent
+            or os.environ.get("PAPER_RECOMMENDER_USER_AGENT")
+            or self.DEFAULT_USER_AGENT
+        )
 
     def _wait_for_rate_limit(self):
-        """Respect arXiv rate limiting."""
-        elapsed = time.time() - self._last_request_time
+        """Respect arXiv rate limiting across all clients in this process."""
+        elapsed = time.monotonic() - self.__class__._last_request_finished_at
         if elapsed < self.delay:
             time.sleep(self.delay - elapsed)
-        self._last_request_time = time.time()
 
-    def _fetch_url(self, url: str, timeout: int = 30) -> str:
-        """Fetch a URL with retry on 429 rate limit errors."""
-        self._wait_for_rate_limit()
+    def _headers(self) -> Dict[str, str]:
+        """Build headers for arXiv requests."""
+        headers = {'User-Agent': self.user_agent}
+        if self.contact:
+            headers['From'] = self.contact
+        return headers
 
+    @staticmethod
+    def _retry_after_seconds(error: urllib.error.HTTPError) -> Optional[float]:
+        """Parse a numeric Retry-After header when arXiv sends one."""
+        retry_after = error.headers.get('Retry-After') if error.headers else None
+        if not retry_after:
+            return None
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            return None
+
+    def _retry_delay(self, attempt: int, error: Optional[urllib.error.HTTPError] = None) -> float:
+        """Compute conservative retry backoff."""
+        delay = self.delay * (2 ** attempt)
+        if error is not None:
+            retry_after = self._retry_after_seconds(error)
+            if retry_after is not None:
+                delay = max(delay, retry_after)
+        return min(delay, self.max_retry_delay)
+
+    def _request_bytes(self, url: str, timeout: int = 60) -> bytes:
+        """Fetch bytes with one in-flight arXiv request per process."""
+        req = urllib.request.Request(url, headers=self._headers())
+        with self.__class__._request_lock:
+            self._wait_for_rate_limit()
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    return response.read()
+            finally:
+                self.__class__._last_request_finished_at = time.monotonic()
+
+    def _fetch_bytes(self, url: str, timeout: int = 60) -> bytes:
+        """Fetch bytes with retry on 429, 5xx, and network timeouts."""
+        last_error: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:
-                with urllib.request.urlopen(url, timeout=timeout) as response:
-                    return response.read().decode('utf-8')
+                return self._request_bytes(url, timeout=timeout)
             except urllib.error.HTTPError as e:
-                if e.code == 429 and attempt < self.max_retries - 1:
-                    wait_time = self.delay * (2 ** attempt)
-                    print(f"  Rate limited (429), retrying in {wait_time:.0f}s... (attempt {attempt + 1}/{self.max_retries})")
+                last_error = e
+                retryable = e.code == 429 or 500 <= e.code < 600
+                if retryable and attempt < self.max_retries - 1:
+                    wait_time = self._retry_delay(attempt, e)
+                    print(f"  HTTP {e.code}, retrying in {wait_time:.0f}s... (attempt {attempt + 1}/{self.max_retries})")
                     time.sleep(wait_time)
-                    self._last_request_time = time.time()
                 else:
                     raise
+            except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+                last_error = e
+                if attempt < self.max_retries - 1:
+                    wait_time = self._retry_delay(attempt)
+                    print(f"  Network error ({type(e).__name__}: {e}), retrying in {wait_time:.0f}s... (attempt {attempt + 1}/{self.max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
+        raise RuntimeError(f"Exhausted {self.max_retries} retries: {last_error}")
+
+    def _fetch_url(self, url: str, timeout: int = 60) -> str:
+        """Fetch a URL as UTF-8 text."""
+        return self._fetch_bytes(url, timeout=timeout).decode('utf-8', errors='replace')
 
     @staticmethod
     def _business_days_cutoff(days_back: int) -> datetime:
@@ -139,23 +219,33 @@ class ArxivClient:
                 remaining -= 1
         return cutoff
 
+    @staticmethod
+    def _format_arxiv_date(dt: datetime) -> str:
+        """Format datetime for arXiv submittedDate range queries."""
+        return dt.strftime("%Y%m%d%H%M")
+
     def search(self,
                query: Optional[str] = None,
                categories: Optional[List[str]] = None,
                max_results: int = 100,
                days_back: int = 7,
                sort_by: str = "submittedDate",
-               sort_order: str = "descending") -> List[Dict]:
+               sort_order: str = "descending",
+               page_size: int = DEFAULT_PAGE_SIZE,
+               verbose: bool = False) -> List[Dict]:
         """
-        Search for papers on arXiv.
+        Search for papers on arXiv, paginating in batches of ``page_size``.
 
         Args:
             query: Search query string (title, abstract, authors)
             categories: List of arXiv categories to search (e.g., ['cs.AI', 'cs.LG'])
-            max_results: Maximum number of papers to return
-            days_back: Only include papers from the last N days
+            max_results: Maximum number of papers to return (across all pages)
+            days_back: Only include papers from the last N business days
             sort_by: Sort field ('submittedDate', 'relevance', 'lastUpdatedDate')
             sort_order: 'ascending' or 'descending'
+            page_size: Per-request batch size. Defaults to small slices; arXiv
+                supports up to 2,000 per request.
+            verbose: Print pagination progress
 
         Returns:
             List of paper dictionaries with keys:
@@ -167,6 +257,21 @@ class ArxivClient:
             - published: Publication date
             - categories: List of arXiv categories
         """
+        if max_results <= 0:
+            return []
+
+        if max_results > self.MAX_QUERY_RESULTS:
+            if verbose:
+                print(f"  Limiting arXiv request to {self.MAX_QUERY_RESULTS:,} results")
+            max_results = self.MAX_QUERY_RESULTS
+
+        if days_back is not None and days_back < 0:
+            raise ValueError("days_back must be non-negative")
+
+        # Date cutoff is used in the API query to avoid asking arXiv to render
+        # huge result sets, and again locally as a final guard.
+        cutoff_date = self._business_days_cutoff(days_back) if days_back is not None else None
+
         # Build search query
         search_parts = []
 
@@ -185,35 +290,76 @@ class ArxivClient:
             cat_query = ' OR '.join(f'cat:{cat}' for cat in expanded_cats)
             search_parts.append(f'({cat_query})')
 
+        if cutoff_date is not None:
+            now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+            start_date = self._format_arxiv_date(cutoff_date)
+            end_date = self._format_arxiv_date(now_utc)
+            search_parts.append(f"submittedDate:[{start_date} TO {end_date}]")
+
         search_query = ' AND '.join(search_parts) if search_parts else 'all:*'
 
-        # Build API URL
-        params = {
-            'search_query': search_query,
-            'start': 0,
-            'max_results': max_results,
-            'sortBy': sort_by,
-            'sortOrder': sort_order
-        }
+        # Early-termination is only valid when paging from newest to oldest.
+        can_short_circuit = (
+            cutoff_date is not None
+            and sort_by == "submittedDate"
+            and sort_order == "descending"
+        )
 
-        url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
+        all_papers: List[Dict] = []
+        start = 0
+        page_size = max(1, min(page_size, self.MAX_PAGE_SIZE))
 
-        # Make request
-        try:
-            xml_data = self._fetch_url(url)
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
+        while len(all_papers) < max_results:
+            batch_size = min(page_size, max_results - len(all_papers))
+            params = {
+                'search_query': search_query,
+                'start': start,
+                'max_results': batch_size,
+                'sortBy': sort_by,
+                'sortOrder': sort_order,
+            }
+            url = f"{self.BASE_URL}?{urllib.parse.urlencode(params)}"
 
-        # Parse XML response
-        papers = self._parse_response(xml_data)
+            try:
+                xml_data = self._fetch_url(url)
+            except Exception as e:
+                # Keep partial results if any pages already succeeded; otherwise propagate.
+                if all_papers:
+                    print(f"  Warning: pagination stopped at {len(all_papers)} papers ({e})")
+                    break
+                raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
 
-        # Filter by date if specified (count business days since arXiv
-        # doesn't publish on weekends; use UTC to match arXiv timestamps)
-        if days_back is not None:
-            cutoff_date = self._business_days_cutoff(days_back)
-            papers = [p for p in papers if p['published'] >= cutoff_date]
+            page_papers = self._parse_response(xml_data)
+            if verbose:
+                print(f"  Page start={start}: {len(page_papers)} papers")
 
-        return papers
+            if not page_papers:
+                # Empty page → end of results.
+                break
+
+            all_papers.extend(page_papers)
+
+            # Last page: arXiv returned fewer than we asked for.
+            if len(page_papers) < batch_size:
+                break
+
+            # Date short-circuit: once the oldest paper in this page is past the
+            # cutoff, every later page will be older too (sorted descending).
+            if can_short_circuit:
+                oldest = min(
+                    (p['published'] for p in page_papers if p.get('published')),
+                    default=None,
+                )
+                if oldest is not None and oldest < cutoff_date:
+                    break
+
+            start += batch_size
+
+        # Apply final date filter (the last fetched page may straddle the cutoff).
+        if cutoff_date is not None:
+            all_papers = [p for p in all_papers if p.get('published') and p['published'] >= cutoff_date]
+
+        return all_papers
 
     def fetch_by_ids(self, arxiv_ids: List[str], verbose: bool = False) -> List[Dict]:
         """
@@ -226,6 +372,21 @@ class ArxivClient:
         Returns:
             List of paper dictionaries
         """
+        if not arxiv_ids:
+            return []
+
+        # Keep id_list requests small and predictable. This also avoids long
+        # URLs when author pages contain many papers.
+        papers = []
+        batch_size = 50
+        for i in range(0, len(arxiv_ids), batch_size):
+            batch_ids = arxiv_ids[i:i + batch_size]
+            papers.extend(self._fetch_id_batch(batch_ids, verbose=verbose))
+
+        return papers
+
+    def _fetch_id_batch(self, arxiv_ids: List[str], verbose: bool = False) -> List[Dict]:
+        """Fetch one small batch of arXiv IDs."""
         id_list = ','.join(arxiv_ids)
         params = {
             'id_list': id_list,
@@ -353,9 +514,6 @@ class ArxivClient:
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
 
-        # Download PDF
-        self._wait_for_rate_limit()
-
         if verbose:
             print(f"  Downloading: {paper['title'][:50]}...")
 
@@ -365,13 +523,7 @@ class ArxivClient:
             if not pdf_url.endswith('.pdf'):
                 pdf_url = pdf_url + '.pdf'
 
-            req = urllib.request.Request(
-                pdf_url,
-                headers={'User-Agent': 'paper_recommender/1.0 (academic research tool)'}
-            )
-
-            with urllib.request.urlopen(req, timeout=60) as response:
-                pdf_data = response.read()
+            pdf_data = self._fetch_bytes(pdf_url, timeout=60)
 
             with open(output_path, 'wb') as f:
                 f.write(pdf_data)
@@ -407,19 +559,11 @@ class ArxivClient:
         base_id = arxiv_id.split('v')[0] if 'v' in arxiv_id else arxiv_id
         html_url = f"https://arxiv.org/html/{base_id}"
 
-        self._wait_for_rate_limit()
-
         if verbose:
             print(f"  Fetching HTML: {paper['title'][:50]}...")
 
         try:
-            req = urllib.request.Request(
-                html_url,
-                headers={'User-Agent': 'paper_recommender/1.0 (academic research tool)'}
-            )
-
-            with urllib.request.urlopen(req, timeout=30) as response:
-                html_data = response.read().decode('utf-8', errors='ignore')
+            html_data = self._fetch_url(html_url, timeout=30)
 
             # Parse HTML to extract text
             parser = ArxivHTMLParser()
@@ -555,7 +699,8 @@ class ArxivClient:
             max_results=max_results,
             days_back=days_back,
             sort_by="submittedDate",
-            sort_order="descending"
+            sort_order="descending",
+            verbose=verbose,
         )
 
         if verbose:
@@ -602,8 +747,11 @@ def paper_to_dict(paper: Dict, full_text: Optional[str] = None) -> Dict[str, str
     Returns:
         Dictionary compatible with SimilarityEngine methods
     """
+    arxiv_id = paper.get('arxiv_id', '')
+    embedding_key = f"{arxiv_id}#fulltext" if full_text else arxiv_id
+
     return {
-        'path': paper.get('arxiv_id', ''),
+        'path': embedding_key,
         'text': paper_to_text(paper, full_text),
         'title': paper.get('title', ''),
         'author': ', '.join(paper.get('authors', [])),  # All authors

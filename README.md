@@ -77,8 +77,11 @@ python scripts/recommend.py arxiv --no-download     # Preview without downloadin
 | `--days N` | Look back N days (default: 7) |
 | `--no-download` | Preview only (don't download) |
 | `--full-text` | Use full text from arXiv HTML (slower but more accurate) |
+| `--full-text-limit N` | Max HTML pages to fetch with `--full-text` (default: 50) |
 
 **Default categories:** `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
+
+For polite arXiv access, requests are serialized and rate-limited to at least one request every three seconds. Set `PAPER_RECOMMENDER_CONTACT` to an email address or URL if you want requests to include a `From` header.
 
 **More categories:**
 | Category | Description |

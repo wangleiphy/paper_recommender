@@ -272,32 +272,89 @@ class ArxivClient:
         # huge result sets, and again locally as a final guard.
         cutoff_date = self._business_days_cutoff(days_back) if days_back is not None else None
 
-        # Build search query
-        search_parts = []
-
+        # Build the parts shared by every per-category query.
+        base_parts = []
         if query:
-            search_parts.append(f'all:{query}')
+            base_parts.append(f'all:{query}')
 
-        if categories:
-            # Add wildcard for broad categories (e.g., cond-mat -> cond-mat*)
-            # This fixes arXiv API sorting issues with parent categories
-            expanded_cats = []
-            for cat in categories:
-                if '.' not in cat and not cat.endswith('*'):
-                    expanded_cats.append(f'{cat}*')
-                else:
-                    expanded_cats.append(cat)
-            cat_query = ' OR '.join(f'cat:{cat}' for cat in expanded_cats)
-            search_parts.append(f'({cat_query})')
-
+        date_part = None
         if cutoff_date is not None:
             now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
             start_date = self._format_arxiv_date(cutoff_date)
             end_date = self._format_arxiv_date(now_utc)
-            search_parts.append(f"submittedDate:[{start_date} TO {end_date}]")
+            date_part = f"submittedDate:[{start_date} TO {end_date}]"
 
-        search_query = ' AND '.join(search_parts) if search_parts else 'all:*'
+        # Query each category separately rather than OR-ing them into one broad
+        # query. arXiv's export API times out (HTTP 503, then 429 rate-limiting)
+        # on a wide category union sorted by submittedDate; single-category
+        # queries return quickly. ``None`` is the no-category case (query/date
+        # only). Broad parent categories get a wildcard (cond-mat -> cond-mat*).
+        if categories:
+            query_cats = []
+            for cat in categories:
+                if '.' not in cat and not cat.endswith('*'):
+                    query_cats.append(f'{cat}*')
+                else:
+                    query_cats.append(cat)
+        else:
+            query_cats = [None]
 
+        # Merge results across categories, deduping by arXiv id (a paper may be
+        # cross-listed in several of the requested categories).
+        merged: Dict[str, Dict] = {}
+        for cat in query_cats:
+            parts = list(base_parts)
+            if cat is not None:
+                parts.append(f'cat:{cat}')
+            if date_part is not None:
+                parts.append(date_part)
+            search_query = ' AND '.join(parts) if parts else 'all:*'
+
+            try:
+                cat_papers = self._paginate_search(
+                    search_query, max_results, sort_by, sort_order,
+                    page_size, cutoff_date, verbose,
+                )
+            except Exception as e:
+                # Keep whatever earlier categories returned; otherwise propagate.
+                if merged:
+                    print(f"  Warning: stopped after {len(merged)} papers ({e})")
+                    break
+                raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
+
+            for paper in cat_papers:
+                arxiv_id = paper.get('arxiv_id')
+                if arxiv_id and arxiv_id not in merged:
+                    merged[arxiv_id] = paper
+
+        all_papers = list(merged.values())
+
+        # Apply final date filter (the last fetched page may straddle the cutoff).
+        if cutoff_date is not None:
+            all_papers = [p for p in all_papers if p.get('published') and p['published'] >= cutoff_date]
+
+        # Re-sort the merged set; per-category ordering is lost once combined.
+        if sort_by in ("submittedDate", "lastUpdatedDate"):
+            all_papers.sort(
+                key=lambda p: p.get('published') or datetime.min,
+                reverse=(sort_order == "descending"),
+            )
+
+        return all_papers[:max_results]
+
+    def _paginate_search(self,
+                         search_query: str,
+                         max_results: int,
+                         sort_by: str,
+                         sort_order: str,
+                         page_size: int,
+                         cutoff_date: Optional[datetime],
+                         verbose: bool = False) -> List[Dict]:
+        """Fetch one search query, paginating in batches of ``page_size``.
+
+        Raises on the first failed page when no results have been gathered yet;
+        keeps partial results if a later page fails.
+        """
         # Early-termination is only valid when paging from newest to oldest.
         can_short_circuit = (
             cutoff_date is not None
@@ -305,12 +362,12 @@ class ArxivClient:
             and sort_order == "descending"
         )
 
-        all_papers: List[Dict] = []
+        papers: List[Dict] = []
         start = 0
         page_size = max(1, min(page_size, self.MAX_PAGE_SIZE))
 
-        while len(all_papers) < max_results:
-            batch_size = min(page_size, max_results - len(all_papers))
+        while len(papers) < max_results:
+            batch_size = min(page_size, max_results - len(papers))
             params = {
                 'search_query': search_query,
                 'start': start,
@@ -324,10 +381,10 @@ class ArxivClient:
                 xml_data = self._fetch_url(url)
             except Exception as e:
                 # Keep partial results if any pages already succeeded; otherwise propagate.
-                if all_papers:
-                    print(f"  Warning: pagination stopped at {len(all_papers)} papers ({e})")
+                if papers:
+                    print(f"  Warning: pagination stopped at {len(papers)} papers ({e})")
                     break
-                raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
+                raise
 
             page_papers = self._parse_response(xml_data)
             if verbose:
@@ -337,7 +394,7 @@ class ArxivClient:
                 # Empty page → end of results.
                 break
 
-            all_papers.extend(page_papers)
+            papers.extend(page_papers)
 
             # Last page: arXiv returned fewer than we asked for.
             if len(page_papers) < batch_size:
@@ -355,11 +412,7 @@ class ArxivClient:
 
             start += batch_size
 
-        # Apply final date filter (the last fetched page may straddle the cutoff).
-        if cutoff_date is not None:
-            all_papers = [p for p in all_papers if p.get('published') and p['published'] >= cutoff_date]
-
-        return all_papers
+        return papers
 
     def fetch_by_ids(self, arxiv_ids: List[str], verbose: bool = False) -> List[Dict]:
         """

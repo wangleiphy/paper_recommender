@@ -89,3 +89,48 @@ def test_results_deduped_across_categories():
 
     ids = sorted(p["arxiv_id"] for p in papers)
     assert ids == ["2601.0001", "2601.0002", "2601.0003"], ids
+
+
+def test_failed_category_does_not_block_later_ones():
+    """A category whose request fails is skipped; later categories are still
+    queried. Otherwise a mid-list 429 truncates the candidate pool to the
+    first categories, skewing recommendations toward them."""
+    client = ArxivClient()
+    calls = []
+
+    def fake_fetch_url(url, timeout=60):
+        calls.append(url)
+        if "cond-mat" in url:
+            raise RuntimeError("HTTP Error 429")
+        if "quant-ph" in url:
+            return _make_feed(["2601.0003"])
+        return _make_feed(["2601.0001"])
+
+    client._fetch_url = fake_fetch_url
+
+    papers = client.search(
+        categories=["cs.LG", "cond-mat", "quant-ph"],
+        days_back=None, max_results=50,
+    )
+
+    assert len(calls) == 3, f"expected all 3 categories tried, got {len(calls)}: {calls}"
+    ids = sorted(p["arxiv_id"] for p in papers)
+    assert ids == ["2601.0001", "2601.0003"], ids
+
+
+def test_all_categories_failing_raises():
+    """If every category fails there is nothing to recommend from; the error
+    must propagate instead of returning an empty list silently."""
+    client = ArxivClient()
+
+    def fake_fetch_url(url, timeout=60):
+        raise RuntimeError("HTTP Error 429")
+
+    client._fetch_url = fake_fetch_url
+
+    try:
+        client.search(categories=["cs.LG", "quant-ph"], days_back=None, max_results=50)
+    except RuntimeError:
+        pass
+    else:
+        assert False, "expected RuntimeError when all categories fail"

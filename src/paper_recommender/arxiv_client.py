@@ -302,6 +302,8 @@ class ArxivClient:
         # Merge results across categories, deduping by arXiv id (a paper may be
         # cross-listed in several of the requested categories).
         merged: Dict[str, Dict] = {}
+        failed_cats: List[str] = []
+        last_error: Optional[Exception] = None
         for cat in query_cats:
             parts = list(base_parts)
             if cat is not None:
@@ -316,16 +318,24 @@ class ArxivClient:
                     page_size, cutoff_date, verbose,
                 )
             except Exception as e:
-                # Keep whatever earlier categories returned; otherwise propagate.
-                if merged:
-                    print(f"  Warning: stopped after {len(merged)} papers ({e})")
-                    break
-                raise RuntimeError(f"Failed to fetch from arXiv API: {e}")
+                # Skip just this category; still try the remaining ones so a
+                # mid-list failure doesn't skew the pool toward earlier
+                # categories.
+                failed_cats.append(cat or '<all>')
+                last_error = e
+                print(f"  Warning: skipping category {cat or '<all>'} ({e})")
+                continue
 
             for paper in cat_papers:
                 arxiv_id = paper.get('arxiv_id')
                 if arxiv_id and arxiv_id not in merged:
                     merged[arxiv_id] = paper
+
+        if failed_cats:
+            print(f"  Warning: no results from {', '.join(failed_cats)}; "
+                  f"recommendations may be skewed toward the remaining categories")
+            if not merged:
+                raise RuntimeError(f"Failed to fetch from arXiv API: {last_error}")
 
         all_papers = list(merged.values())
 

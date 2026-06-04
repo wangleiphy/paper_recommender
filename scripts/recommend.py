@@ -32,13 +32,15 @@ DEFAULT_DUPLICATE_TARGET = '/Users/lewang/Library/CloudStorage/OneDrive-Personal
 # Default arXiv author ID for reference papers
 DEFAULT_AUTHOR_ID = 'wang_l_1'
 
-# Default arXiv categories - ML/AI + Physics
+# Default arXiv categories - Physics + ML/AI
+# Categories are queried in order; keep high-volume ML categories last so
+# rate-limit failures partway through don't leave an ML-only candidate pool.
 DEFAULT_ARXIV_CATEGORIES = [
-    'cs.LG', 'stat.ML',           # Machine Learning
     'cond-mat',                   # All Condensed Matter
     'physics.comp-ph',            # Computational Physics
     'physics.chem-ph',            # Chemical Physics
     'quant-ph',                   # Quantum Physics
+    'cs.LG', 'stat.ML',           # Machine Learning
 ]
 DEFAULT_FULL_TEXT_LIMIT = 50
 
@@ -493,7 +495,7 @@ Examples:
   python recommend.py arxiv -c cond-mat quant-ph # Multiple categories
   python recommend.py arxiv --no-download        # Preview only
 
-Default categories: cs.LG, stat.ML, cond-mat, physics.comp-ph, physics.chem-ph, quant-ph
+Default categories: cond-mat, physics.comp-ph, physics.chem-ph, quant-ph, cs.LG, stat.ML
 
 More categories:
   cond-mat.supr-con   Superconductivity

@@ -57,7 +57,7 @@ scripts/recommend.py     # Unified CLI with 'local' and 'arxiv' subcommands
 - **Diversity**: `surprise_factor` samples from top-3x candidates to avoid echo chambers
 - **Default directory**: iCloud Downloads (`~/Library/Mobile Documents/com~apple~CloudDocs/Downloads/`)
 - **arXiv API**: Uses Atom feed API with 3-second delay between requests (rate limiting)
-- **arXiv categories**: Default includes `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
+- **arXiv categories**: Default includes `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`, `cs.LG`, `stat.ML` (queried in order; high-volume ML categories last so a mid-list rate-limit failure doesn't leave an ML-only pool)
 - **arXiv similarity**: Default uses title+abstract; `--full-text` fetches full text from arXiv HTML pages (slower but more accurate, not all papers have HTML)
 - **Author references**: By default uses both red-tagged papers and arXiv preprints from author `wang_l_1`; use `--refs author` for only arXiv preprints, `--refs tagged` for only red-tagged papers
 

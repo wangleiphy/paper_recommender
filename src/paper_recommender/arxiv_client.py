@@ -185,7 +185,11 @@ class ArxivClient:
                 retryable = e.code == 429 or 500 <= e.code < 600
                 if retryable and attempt < self.max_retries - 1:
                     wait_time = self._retry_delay(attempt, e)
-                    print(f"  HTTP {e.code}, retrying in {wait_time:.0f}s... (attempt {attempt + 1}/{self.max_retries})")
+                    print(
+                        f"  HTTP {e.code}, retrying in {wait_time:.0f}s... "
+                        f"(attempt {attempt + 1}/{self.max_retries})",
+                        flush=True,
+                    )
                     time.sleep(wait_time)
                 else:
                     raise
@@ -193,7 +197,12 @@ class ArxivClient:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     wait_time = self._retry_delay(attempt)
-                    print(f"  Network error ({type(e).__name__}: {e}), retrying in {wait_time:.0f}s... (attempt {attempt + 1}/{self.max_retries})")
+                    print(
+                        f"  Network error ({type(e).__name__}: {e}), "
+                        f"retrying in {wait_time:.0f}s... "
+                        f"(attempt {attempt + 1}/{self.max_retries})",
+                        flush=True,
+                    )
                     time.sleep(wait_time)
                 else:
                     raise

@@ -62,9 +62,9 @@ python scripts/recommend.py local -k 20 -n 500 # Top 20 from 500 candidates
 Discover new papers from recent arXiv preprints.
 
 ```bash
-python scripts/recommend.py arxiv                   # 10 papers from last 7 days
+python scripts/recommend.py arxiv                   # 10 best papers that are new since the last run
 python scripts/recommend.py arxiv -k 20             # 20 papers
-python scripts/recommend.py arxiv --days 14         # Last 2 weeks
+python scripts/recommend.py arxiv --days 14 --include-seen  # Re-rank the last 2 weeks, including already-seen papers
 python scripts/recommend.py arxiv -c cond-mat       # Only condensed matter
 python scripts/recommend.py arxiv --no-download     # Preview without downloading
 ```
@@ -74,10 +74,14 @@ python scripts/recommend.py arxiv --no-download     # Preview without downloadin
 | Flag | Description |
 |------|-------------|
 | `-c, --categories` | arXiv categories to search |
-| `--days N` | Look back N days (default: 7) |
+| `--days N` | Minimum lookback in business days (default: 3); extended automatically to cover the time since the previous run |
+| `--scorer` | `logreg` (default), `knn`, or `centroid` (old behaviour) |
+| `--include-seen` | Also rescore papers considered by earlier runs |
 | `--no-download` | Preview only (don't download) |
 | `--full-text` | Use full text from arXiv HTML (slower but more accurate) |
 | `--full-text-limit N` | Max HTML pages to fetch with `--full-text` (default: 50) |
+
+Each run scores only papers that are **new**: not in the download directory and not in the seen ledger (`.cache/seen_arxiv.json`) of earlier runs. The run time therefore doesn't matter, and skipped days are caught up. Preview runs (`--no-download`) don't update the ledger. `run.sh` is the daily entry point (`arxiv -k 20`).
 
 **Default categories:** `cs.LG`, `stat.ML`, `cond-mat`, `physics.comp-ph`, `physics.chem-ph`, `quant-ph`
 
@@ -103,7 +107,7 @@ For polite arXiv access, requests are serialized and rate-limited to at least on
 python scripts/recommend.py local -k 20 -n 1000
 
 # arXiv condensed matter papers from last 2 weeks
-python scripts/recommend.py arxiv -c cond-mat --days 14 -k 15
+python scripts/recommend.py arxiv -c cond-mat --days 14 --include-seen -k 15
 
 # arXiv ML + quantum physics, preview only
 python scripts/recommend.py arxiv -c cs.LG quant-ph --no-download
@@ -114,9 +118,9 @@ python scripts/recommend.py local -v
 
 ## How It Works
 
-1. Gathers reference papers (your arXiv publications and/or red-tagged PDFs)
-2. Extracts text and creates semantic embeddings
-3. Ranks candidates by similarity to your references
+1. Gathers reference papers (your arXiv publications and/or red-tagged PDFs). In arXiv mode, red PDFs named by arXiv id are embedded from their arXiv title + abstract, the same representation as candidates.
+2. Creates semantic embeddings (`all-mpnet-base-v2`)
+3. Ranks candidates. arXiv mode defaults to a logistic regression of your references against background papers (today's candidates plus cached earlier candidates). In a Nov 2026 offline test it found about twice as many later red-tagged papers in the top 1% as the old centroid similarity.
 4. Tags top matches with gray
 
 Embeddings are cached (`.cache/`) for fast subsequent runs.

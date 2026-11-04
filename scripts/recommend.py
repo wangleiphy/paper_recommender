@@ -21,8 +21,9 @@ from tqdm import tqdm
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from paper_recommender import TagDetector, SimilarityEngine, ArxivClient, paper_to_dict
+from paper_recommender import TagDetector, SimilarityEngine, ArxivClient, paper_to_dict, paper_to_text
 from paper_recommender.utils import extract_paper_data, move_files_with_pattern
+from paper_recommender.seen_ledger import SeenLedger, base_arxiv_id, arxiv_ids_in_directory, _ARXIV_FILENAME
 
 
 # Default paths
@@ -77,6 +78,61 @@ def get_reference_papers(directory: str, recursive: bool, verbose: bool) -> tupl
     return red_tagged_pdfs, reference_papers
 
 
+def get_tagged_reference_embeddings_arxiv(directory: str, recursive: bool, engine: SimilarityEngine,
+                                          client: ArxivClient, verbose: bool) -> tuple:
+    """Embed red-tagged papers the same way arXiv candidates are embedded.
+
+    Red PDFs named by arXiv id are represented by their arXiv title+abstract
+    (cached under ``ref::<id>``), matching the candidate representation. The
+    model only reads the first 384 tokens, which for a PDF is mostly author
+    names, affiliations and e-mails. Other PDFs fall back to extracted text.
+
+    Returns (embeddings, base arXiv ids of red papers).
+    """
+    print(f"Scanning for red-tagged papers: {directory}")
+    red_pdfs = TagDetector.find_red_tagged_pdfs(directory, recursive=recursive)
+    print(f"  Found {len(red_pdfs)} red-tagged PDF files")
+    if not red_pdfs:
+        print("  No red-tagged PDF files found (tag favourites red in Finder)")
+        return [], set()
+
+    by_id, other = {}, []
+    for path in red_pdfs:
+        m = _ARXIV_FILENAME.match(os.path.basename(path))
+        if m:
+            by_id.setdefault(m.group(1), path)
+        else:
+            other.append(path)
+
+    papers = [{'path': f"ref::{aid}", 'text': ''} for aid in by_id if engine.has_cached(f"ref::{aid}")]
+    need = [aid for aid in by_id if not engine.has_cached(f"ref::{aid}")]
+    if need:
+        print(f"  Fetching arXiv abstracts for {len(need)} new red-tagged papers...")
+        got = set()
+        for p in client.fetch_by_ids(need, verbose=verbose):
+            aid = base_arxiv_id(p.get('arxiv_id', ''))
+            if aid in by_id and aid not in got:
+                papers.append({'path': f"ref::{aid}", 'text': paper_to_text(p)})
+                got.add(aid)
+        missing = [aid for aid in need if aid not in got]
+        if missing:
+            print(f"  {len(missing)} abstracts unavailable; using PDF text for those")
+            other.extend(by_id[aid] for aid in missing)
+
+    for path in other:
+        if engine.has_cached(path):
+            papers.append({'path': path, 'text': ''})
+        else:
+            data = extract_paper_data(path, verbose=verbose)
+            if data:
+                papers.append({'path': path, 'text': data['text']})
+
+    n_abs = sum(p['path'].startswith('ref::') for p in papers)
+    print(f"  Using {len(papers)} red-tagged references ({n_abs} via arXiv abstract)")
+    print()
+    return engine.get_embeddings_batch(papers), set(by_id)
+
+
 def get_author_reference_papers(author_id: str, verbose: bool) -> List[Dict]:
     """Fetch papers from an arXiv author page to use as additional references."""
     print(f"Fetching arXiv preprints for author: {author_id}")
@@ -120,7 +176,7 @@ def print_recommendations(recommendations: List, mode: str = "local"):
 
     for i, (paper, score) in enumerate(recommendations, 1):
         print(f"{i}. {paper['title']}")
-        print(f"   Similarity: {score:.4f}")
+        print(f"   Score: {score:.4f}")
 
         if mode == "arxiv":
             print(f"   arXiv ID: {paper.get('arxiv_id', 'N/A')}")
@@ -148,6 +204,7 @@ def recommend_local(
     duplicate_target_dir: Optional[str] = None,
     refs: str = 'both',
     model_name: str = 'all-mpnet-base-v2',
+    scorer: str = 'centroid',
 ):
     """Recommend papers from local collection."""
     print("=" * 70)
@@ -222,7 +279,8 @@ def recommend_local(
         reference_embeddings,
         candidate_papers,
         top_k=top_k,
-        surprise_factor=surprise_factor
+        surprise_factor=surprise_factor,
+        method=scorer,
     )
 
     print_recommendations(recommendations, mode="local")
@@ -258,8 +316,8 @@ def recommend_arxiv(
     reference_directory: str,
     output_directory: str,
     categories: Optional[List[str]] = None,
-    max_candidates: int = 100,
-    days: int = 7,
+    max_candidates: Optional[int] = None,
+    days: int = 3,
     top_k: int = 10,
     verbose: bool = False,
     recursive: bool = True,
@@ -270,8 +328,16 @@ def recommend_arxiv(
     max_full_text_fetches: int = DEFAULT_FULL_TEXT_LIMIT,
     refs: str = 'both',
     model_name: str = 'all-mpnet-base-v2',
+    scorer: str = 'logreg',
+    include_seen: bool = False,
+    ledger_path: str = os.path.join('.cache', 'seen_arxiv.json'),
 ):
-    """Recommend papers from arXiv."""
+    """Recommend papers from arXiv.
+
+    Each run scores only papers not considered by an earlier run (seen
+    ledger) and not already present in the output directory, so runs can
+    happen at any time of day and missed days are caught up automatically.
+    """
     if categories is None:
         categories = DEFAULT_ARXIV_CATEGORIES
 
@@ -280,45 +346,72 @@ def recommend_arxiv(
     print("=" * 70)
     print()
 
-    # Step 1: Gather reference papers based on refs mode
+    client = ArxivClient()
+    engine = SimilarityEngine(model_name=model_name)
+
+    # Step 1: Gather reference embeddings based on refs mode
     print("[1/5] Finding reference papers...")
-    reference_papers = []
+    reference_embeddings = []
+    red_ids = set()
 
     if refs in ('tagged', 'both'):
-        _, tagged_papers = get_reference_papers(reference_directory, recursive, verbose)
-        reference_papers.extend(tagged_papers)
+        tagged_embs, red_ids = get_tagged_reference_embeddings_arxiv(
+            reference_directory, recursive, engine, client, verbose)
+        reference_embeddings.extend(tagged_embs)
 
     if refs in ('author', 'both'):
         author_papers = get_author_reference_papers(DEFAULT_AUTHOR_ID, verbose)
         if author_papers:
-            reference_papers.extend(author_papers)
+            reference_embeddings.extend(engine.get_embeddings_batch(author_papers))
+            red_ids |= {base_arxiv_id(p['arxiv_id']) for p in author_papers}
 
-    if not reference_papers:
+    if not reference_embeddings:
         print("No reference papers found!")
         return
 
-    print(f"  Total reference papers: {len(reference_papers)}")
+    print(f"  Total reference papers: {len(reference_embeddings)}")
     print()
 
     # Step 2: Fetch from arXiv
+    ledger = SeenLedger(ledger_path)
+    lookback = ledger.lookback_days(days)
+    cap = max_candidates or client.MAX_QUERY_RESULTS
     print(f"[2/5] Fetching from arXiv...")
     print(f"  Categories: {', '.join(categories)}")
-    print(f"  Last {days} days, max {max_candidates} papers")
+    last = ledger.last_run.strftime('%Y-%m-%d %H:%M UTC') if ledger.last_run else 'never'
+    print(f"  Last {lookback} business days (previous run: {last}), max {cap} papers")
     print()
 
-    client = ArxivClient()
     arxiv_papers = client.get_recent_papers(
         categories=categories,
-        max_results=max_candidates,
-        days_back=days,
+        max_results=cap,
+        days_back=lookback,
         verbose=verbose
     )
 
     print(f"  Retrieved {len(arxiv_papers)} papers")
+    if len(arxiv_papers) >= cap:
+        print(f"  Warning: hit the {cap}-paper cap; the oldest part of the window was dropped")
+
+    # Only score papers we have not considered before.
+    on_disk = arxiv_ids_in_directory(output_directory, recursive=recursive)
+    n_disk = sum(base_arxiv_id(p['arxiv_id']) in on_disk for p in arxiv_papers)
+    n_seen = sum(p['arxiv_id'] in ledger and base_arxiv_id(p['arxiv_id']) not in on_disk
+                 for p in arxiv_papers)
+    if include_seen:
+        arxiv_papers = [p for p in arxiv_papers if base_arxiv_id(p['arxiv_id']) not in on_disk]
+    else:
+        arxiv_papers = [p for p in arxiv_papers
+                        if base_arxiv_id(p['arxiv_id']) not in on_disk and p['arxiv_id'] not in ledger]
+    print(f"  Skipped {n_disk} already in {os.path.basename(output_directory.rstrip('/'))}/"
+          + ("" if include_seen else f", {n_seen} scored in earlier runs"))
+    print(f"  {len(arxiv_papers)} new candidates")
     print()
 
     if not arxiv_papers:
-        print("No papers found on arXiv!")
+        print("No new papers since the last run.")
+        if download:
+            ledger.save()
         return
 
     # Fetch full text if requested
@@ -345,20 +438,28 @@ def recommend_arxiv(
     else:
         candidate_papers = [paper_to_dict(p) for p in arxiv_papers]
 
-    # Step 3: Compute similarities
-    print(f"[3/5] Computing similarities...")
+    # Step 3: Score candidates
+    print(f"[3/5] Scoring candidates (scorer: {scorer})...")
     top_k = min(top_k, len(candidate_papers))
     print(f"  Will recommend {top_k} papers")
-    print()
 
-    engine = SimilarityEngine(model_name=model_name)
-    reference_embeddings = get_reference_embeddings(reference_papers, engine, verbose)
+    background = None
+    if scorer == 'logreg':
+        # Past candidates from the cache act as random-arXiv negatives. Exclude
+        # anything on disk (earlier recommendations are on-topic, which makes
+        # them harmful as negatives), references, and today's candidates.
+        exclude = on_disk | red_ids | {base_arxiv_id(p['arxiv_id']) for p in arxiv_papers}
+        background = engine.sample_cached_arxiv_embeddings(3000, exclude_ids=exclude)
+        print(f"  Background negatives: {len(candidate_papers)} candidates + {len(background)} cached past candidates")
+    print()
 
     recommendations = engine.find_similar_papers_with_diversity(
         reference_embeddings,
         candidate_papers,
         top_k=top_k,
-        surprise_factor=surprise_factor
+        surprise_factor=surprise_factor,
+        method=scorer,
+        background_embeddings=background,
     )
 
     print_recommendations(recommendations, mode="arxiv")
@@ -393,6 +494,14 @@ def recommend_arxiv(
                         print(f"  ✓ Tagged: {os.path.basename(pdf_path)}")
             print(f"  Tagged {tagged}/{len(downloaded)} papers with Gray")
 
+        # Record every scored candidate as seen, except recommendations whose
+        # download failed, so the next run retries those.
+        failed = ({p.get('arxiv_id') for p, _ in recommendations}
+                  - {p.get('arxiv_id') for _, p, _ in downloaded})
+        ledger.mark(p['arxiv_id'] for p in arxiv_papers if p['arxiv_id'] not in failed)
+        ledger.save()
+        print(f"  Seen ledger: {len(ledger)} papers ({ledger.path})")
+
     print()
     print("=" * 70)
     print("✓ Done!")
@@ -411,7 +520,7 @@ def add_common_args(parser):
     )
     parser.add_argument(
         '--max-candidates', '-n', type=int, default=None,
-        help='Max candidate papers to consider (default: 1000 for both local and arxiv)'
+        help='Max candidate papers to consider (default: 1000 for local, no cap for arxiv)'
     )
     parser.add_argument(
         '--surprise', '-s', type=float, default=0.2,
@@ -441,6 +550,12 @@ def add_common_args(parser):
 
 def main():
     """Main entry point with subcommands."""
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
     parser = argparse.ArgumentParser(
         description='Recommend papers similar to your red-tagged favorites',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -474,6 +589,10 @@ Examples:
     )
     add_common_args(local_parser)
     local_parser.add_argument(
+        '--scorer', choices=SimilarityEngine.SCORERS, default='centroid',
+        help='Ranking method (default: centroid)'
+    )
+    local_parser.add_argument(
         '--no-move-duplicates', action='store_true',
         help='Don\'t move duplicate files to OneDrive'
     )
@@ -489,7 +608,7 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python recommend.py arxiv                      # Default: 10 papers, 7 days
+  python recommend.py arxiv                      # Default: 10 new papers since last run
   python recommend.py arxiv -k 20 --days 14      # Top 20 from last 2 weeks
   python recommend.py arxiv -c cond-mat          # Only condensed matter
   python recommend.py arxiv -c cond-mat quant-ph # Multiple categories
@@ -512,8 +631,17 @@ More categories:
         help='arXiv categories to search'
     )
     arxiv_parser.add_argument(
-        '--days', type=int, default=7,
-        help='Look back N days (default: 7)'
+        '--days', type=int, default=3,
+        help='Minimum lookback in business days (default: 3). Extended automatically '
+             'to reach back past the previous run; already-seen papers are skipped.'
+    )
+    arxiv_parser.add_argument(
+        '--scorer', choices=SimilarityEngine.SCORERS, default='logreg',
+        help='Ranking method (default: logreg; centroid is the pre-Nov-2026 behaviour)'
+    )
+    arxiv_parser.add_argument(
+        '--include-seen', action='store_true',
+        help='Also rescore papers considered by earlier runs (papers already on disk are still skipped)'
     )
     arxiv_parser.add_argument(
         '--no-download', action='store_true',
@@ -554,6 +682,7 @@ More categories:
                 duplicate_target_dir=args.duplicate_target,
                 refs=args.refs,
                 model_name=args.model,
+                scorer=args.scorer,
             )
 
         elif args.mode == 'arxiv':
@@ -562,8 +691,8 @@ More categories:
                 print(f"Error: Directory not found: {ref_dir}")
                 return 1
 
-            # Default max_candidates for arxiv is 1000
-            max_candidates = args.max_candidates if args.max_candidates else 1000
+            # No cap by default: the seen ledger keeps each run's pool to new papers only
+            max_candidates = args.max_candidates
 
             recommend_arxiv(
                 reference_directory=ref_dir,
@@ -581,6 +710,8 @@ More categories:
                 max_full_text_fetches=args.full_text_limit,
                 refs=args.refs,
                 model_name=args.model,
+                scorer=args.scorer,
+                include_seen=args.include_seen,
             )
 
         return 0

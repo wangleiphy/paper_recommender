@@ -441,6 +441,12 @@ def add_common_args(parser):
 
 def main():
     """Main entry point with subcommands."""
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
     parser = argparse.ArgumentParser(
         description='Recommend papers similar to your red-tagged favorites',
         formatter_class=argparse.RawDescriptionHelpFormatter,

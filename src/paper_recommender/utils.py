@@ -46,7 +46,7 @@ def extract_paper_data(pdf_path: str, max_pages: int = 10, verbose: bool = False
 def move_files_with_pattern(
     files: List[str],
     target_dir: str,
-    pattern: str = r'\([0-9]+\)',
+    pattern: str = r'\([0-9]{1,3}\)\.pdf$',
     verbose: bool = False
 ) -> int:
     """

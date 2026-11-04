@@ -22,9 +22,9 @@ python scripts/recommend.py local --top-k 50         # Exactly 50 recommendation
 # === arXiv Recommendations ===
 # Discover new papers from arXiv preprints
 
-python scripts/recommend.py arxiv                         # Default: ML + Physics, 7 days
+python scripts/recommend.py arxiv                         # Default: ML + Physics, papers new since last run
 python scripts/recommend.py arxiv --categories cond-mat   # Only condensed matter
-python scripts/recommend.py arxiv --days 14 --top-k 20    # 2 weeks, 20 papers
+python scripts/recommend.py arxiv --days 14 --include-seen -k 20  # re-rank 2 weeks incl. seen
 python scripts/recommend.py arxiv --no-download           # Preview only
 python scripts/recommend.py arxiv --full-text             # Use full text from HTML (slower)
 ```
@@ -49,7 +49,10 @@ scripts/recommend.py     # Unified CLI with 'local' and 'arxiv' subcommands
 
 ## Key Implementation Details
 
-- **Caching**: Embeddings cached at `.cache/embeddings_cache.pkl` - delete to reset
+- **Caching**: Embeddings cached at `.cache/embeddings_cache.pkl` - delete to reset. Red-tagged arXiv refs are cached as `ref::<id>` (title+abstract)
+- **Seen ledger**: `.cache/seen_arxiv.json` records every arXiv paper scored by a real (downloading) run; later runs skip those and anything already in the download dir. `--days` (default 3 business days) is only a minimum lookback, auto-extended to cover the gap since the last run. Don't go back to a rolling `--days 1` window: it missed every paper submitted 18:00-02:00 UTC (~30% of arXiv)
+- **Scorer**: `--scorer logreg` (arXiv default) = logistic regression, refs vs. today's candidates + 3000 cached past candidates (excluding anything on disk, since past recommendations are on-topic and make bad negatives). `knn` and `centroid` are also available; local mode defaults to `centroid`
+- **Daily entry point**: `run.sh` (`arxiv -k 20`); cron runs it on another machine
 - **Model**: Uses `all-mpnet-base-v2` by default (768-dim, ~420MB); use `--model all-MiniLM-L6-v2` for faster/smaller alternative
 - **PDF extraction**: First 10 pages only (`max_pages=10`) for efficiency
 - **Tag colors**: red=6, orange=7, yellow=5, green=2, blue=4, purple=3, gray=1
